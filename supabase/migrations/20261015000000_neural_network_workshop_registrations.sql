@@ -44,7 +44,7 @@ VALUES (
   'Neural Networks from Scratch: The Math Behind the Magic',
   '2026-10-28',
   '8:30 AM to 12:30 PM',
-  'B009, SMV Block, REVA University, Bengaluru',
+  'SVB B009, REVA University, Bengaluru',
   'Workshop',
   'A focused workshop on the mathematics behind neural networks, led by Mohammed Tasawuff. Organized by Vertex Club, REVA University.',
   true

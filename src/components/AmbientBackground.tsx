@@ -29,9 +29,9 @@ export type DotGridProps = {
   style?: CSSProperties;
 };
 
-function throttle(callback: (...args: any[]) => void, limit: number) {
+function throttle<T extends unknown[]>(callback: (...args: T) => void, limit: number) {
   let lastCall = 0;
-  return (...args: any[]) => {
+  return (...args: T) => {
     const now = performance.now();
     if (now - lastCall >= limit) {
       lastCall = now;
@@ -195,7 +195,7 @@ export function DotGrid({
               },
             });
           },
-        } as any);
+        } as gsap.TweenVars);
       }
     };
 
@@ -228,7 +228,7 @@ export function DotGrid({
               },
             });
           },
-        } as any);
+        } as gsap.TweenVars);
       }
     };
 
@@ -350,26 +350,8 @@ export function Iridescence({
     }
     const gl = renderer.gl;
     gl.clearColor(1, 1, 1, 1);
-    let program: Program | undefined;
-
-    const resize = () => {
-      const width = Math.max(1, container.offsetWidth);
-      const height = Math.max(1, container.offsetHeight);
-      renderer.setSize(width, height);
-      if (program) {
-        program.uniforms.uResolution.value = new Color(
-          gl.canvas.width,
-          gl.canvas.height,
-          gl.canvas.width / gl.canvas.height,
-        );
-      }
-    };
-
-    window.addEventListener("resize", resize, false);
-    resize();
-
     const geometry = new Triangle(gl);
-    program = new Program(gl, {
+    const program = new Program(gl, {
       vertex: vertexShader,
       fragment: fragmentShader,
       uniforms: {
@@ -385,6 +367,20 @@ export function Iridescence({
         uSpeed: { value: speed },
       },
     });
+
+    const resize = () => {
+      const width = Math.max(1, container.offsetWidth);
+      const height = Math.max(1, container.offsetHeight);
+      renderer.setSize(width, height);
+      program.uniforms.uResolution.value = new Color(
+        gl.canvas.width,
+        gl.canvas.height,
+        gl.canvas.width / gl.canvas.height,
+      );
+    };
+
+    window.addEventListener("resize", resize, false);
+    resize();
 
     const mesh = new Mesh(gl, { geometry, program });
     container.appendChild(gl.canvas);

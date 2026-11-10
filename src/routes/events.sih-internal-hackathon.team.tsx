@@ -37,8 +37,10 @@ export const Route = createFileRoute("/events/sih-internal-hackathon/team")({
   component: TeamConsole,
 });
 
-type TeamData = Awaited<ReturnType<typeof getHackathonTeam>>;
-type MemberData = Awaited<ReturnType<typeof getMyTeamMembership>>;
+import type { loadTeamByMemberToken, loadTeamByToken } from "@/lib/hackathon.server";
+
+type TeamData = Awaited<ReturnType<typeof loadTeamByToken>>;
+type MemberData = Awaited<ReturnType<typeof loadTeamByMemberToken>>;
 type MemberDraft = {
   name: string;
   email: string;

@@ -57,7 +57,7 @@ export const myDashboard = createServerFn({ method: "GET" })
 
 export const updateMyProfile = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => memberSelfInput.parse(input))
+  .validator((input: unknown) => memberSelfInput.parse(input))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("members")
@@ -85,7 +85,7 @@ export const myMentorships = createServerFn({ method: "GET" })
 
 export const requestMentor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => mentorRequestInput.parse(input))
+  .validator((input: unknown) => mentorRequestInput.parse(input))
   .handler(async ({ data, context }) => {
     const { loadViewer } = await import("@/lib/roles.server");
     const viewer = await loadViewer(context.supabase, context.userId);
@@ -103,7 +103,7 @@ export const requestMentor = createServerFn({ method: "POST" })
 
 export const respondMentorship = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         id: z.string().uuid(),

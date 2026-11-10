@@ -1,3 +1,4 @@
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Link } from "@tanstack/react-router";
 import { AnimatePresence, motion, useScroll } from "motion/react";
 import { Instagram, Linkedin, Menu, X } from "lucide-react";
@@ -5,60 +6,18 @@ import { useEffect, useState } from "react";
 import { ScrollProgress } from "@/components/motion-kit";
 
 function AdminLink({ mobile = false, onNavigate }: { mobile?: boolean; onNavigate?: () => void }) {
-  const [show, setShow] = useState(false);
-  const [value, setValue] = useState("");
-  const [error, setError] = useState("");
-
-  const expected = (import.meta.env.VITE_ADMIN_PASS as string | undefined) ?? "ordinate";
-  const submit = () => {
-    if (value === expected) {
-      sessionStorage.setItem("vertex-admin-ok", "1");
-      setShow(false);
-      setValue("");
-      setError("");
-      onNavigate?.();
-      window.location.href = "/me";
-    } else {
-      setError("Wrong password.");
-    }
-  };
-
   return (
-    <>
-      <button
-        onClick={() => setShow(true)}
-        className={
-          mobile
-            ? "rounded-xl px-4 py-3 text-left hover:bg-black/[0.04] w-full"
-            : "transition-colors hover:text-foreground"
-        }
-      >
-        Admin
-      </button>
-      {show && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" onClick={() => setShow(false)}>
-          <div className="w-full max-w-sm rounded-2xl border border-hairline bg-card p-6 shadow-lg" onClick={(e) => e.stopPropagation()}>
-            <p className="font-mono text-[10px] uppercase tracking-[0.18em] font-semibold text-silver">Admin access</p>
-            <h3 className="mt-2 font-display text-xl font-semibold">Enter admin password</h3>
-            <p className="mt-1 text-sm text-muted-foreground">This gates the admin dashboard.</p>
-            <input
-              type="password"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="Password"
-              autoFocus
-              className="field-input mt-4 w-full rounded-lg px-3 py-2.5 text-sm"
-            />
-            {error && <p className="mt-2 text-sm font-medium text-destructive">{error}</p>}
-            <div className="mt-4 flex gap-2">
-              <button onClick={submit} className="btn-primary flex-1 justify-center rounded-lg px-4 py-2.5 font-mono text-[11px] font-bold uppercase tracking-widest">Unlock</button>
-              <button onClick={() => setShow(false)} className="btn-ghost rounded-lg px-4 py-2.5 font-mono text-[11px] uppercase tracking-widest">Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <Link
+      to="/admin"
+      onClick={onNavigate}
+      className={
+        mobile
+          ? "block w-full rounded-xl px-4 py-3 text-left hover:bg-secondary"
+          : "transition-colors hover:text-foreground"
+      }
+    >
+      Admin
+    </Link>
   );
 }
 
@@ -90,8 +49,9 @@ export function SiteHeader() {
   const nav = [
     { label: "Members", to: "/members" as const },
     { label: "Events", to: "/events" as const },
+    { label: "Passes", to: "/passes" as const },
     { label: "Projects", to: "/projects" as const },
-    { label: "Feed", to: "/announcements" as const },
+    { label: "Announcements", to: "/announcements" as const },
   ];
 
   return (
@@ -101,9 +61,16 @@ export function SiteHeader() {
         className={`mx-auto flex max-w-6xl items-center justify-between rounded-2xl px-4 py-3 transition-all duration-300 sm:px-5 ${scrolled ? "glass-strong shadow-[var(--shadow-glow)]" : "border border-transparent"}`}
       >
         <Link to="/" className="flex items-center gap-2 text-foreground">
-          <img src="/vertex-logo-transparent.png" alt="Vertex" className="h-8 w-auto" width={80} height={32} decoding="async" />
+          <img
+            src="/vertex-logo-transparent.png"
+            alt="Vertex"
+            className="h-8 w-auto dark:brightness-0 dark:invert"
+            width={80}
+            height={32}
+            decoding="async"
+          />
         </Link>
-        <nav className="hidden items-center gap-5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground lg:flex">
+        <nav className="hidden items-center gap-5 font-mono text-[13px] uppercase tracking-[0.08em] text-muted-foreground lg:flex">
           {nav.map((item) => (
             <Link key={item.label} to={item.to} className="transition-colors hover:text-foreground">
               {item.label}
@@ -130,13 +97,16 @@ export function SiteHeader() {
             </Link>
           )}
         </nav>
-        <button
-          aria-label={open ? "Close menu" : "Open menu"}
-          onClick={() => setOpen(!open)}
-          className="glass-panel rounded-lg p-2 lg:hidden"
-        >
-          {open ? <X size={18} /> : <Menu size={18} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            aria-label={open ? "Close menu" : "Open menu"}
+            onClick={() => setOpen(!open)}
+            className="glass-panel rounded-lg p-2 lg:hidden"
+          >
+            {open ? <X size={18} /> : <Menu size={18} />}
+          </button>
+        </div>
       </div>
       <AnimatePresence>
         {open && (
@@ -152,12 +122,15 @@ export function SiteHeader() {
                   key={item.label}
                   to={item.to}
                   onClick={() => setOpen(false)}
-                  className="rounded-xl px-4 py-3 hover:bg-black/[0.04]"
+                  className="rounded-xl px-4 py-3 hover:bg-secondary"
                 >
                   {item.label}
                 </Link>
               ))}
-              <div className="rounded-xl px-4 py-3 hover:bg-black/[0.04]" onClick={() => setOpen(false)}>
+              <div
+                className="rounded-xl px-4 py-3 hover:bg-secondary"
+                onClick={() => setOpen(false)}
+              >
                 <AdminLink mobile onNavigate={() => setOpen(false)} />
               </div>
               <Link
@@ -198,7 +171,14 @@ export function SiteFooter() {
     <footer className="relative border-t border-hairline">
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-16 md:flex-row md:items-end md:justify-between">
         <div className="flex items-center gap-3">
-          <img src="/vertex-logo-transparent.png" alt="Vertex" className="h-10 w-auto" width={120} height={40} decoding="async" />
+          <img
+            src="/vertex-logo-transparent.png"
+            alt="Vertex"
+            className="h-10 w-auto dark:brightness-0 dark:invert"
+            width={120}
+            height={40}
+            decoding="async"
+          />
           <div>
             <div className="font-display text-xl font-semibold">Vertex</div>
             <div className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">

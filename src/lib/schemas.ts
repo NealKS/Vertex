@@ -44,6 +44,26 @@ export const eventInput = z.object({
   coverUrl: z.string().trim().max(1000).nullable(),
   capacity: z.number().int().min(0).max(100000).nullable(),
   published: z.boolean(),
+  operations: z
+    .object({
+      registrationMode: z.enum(["individual", "team", "disabled"]),
+      registrationOpen: z.boolean(),
+      registrationOpensAt: z.string().datetime().nullable(),
+      registrationClosesAt: z.string().datetime().nullable(),
+      requiresApproval: z.boolean(),
+      waitlistEnabled: z.boolean(),
+      passesEnabled: z.boolean(),
+      checkinEnabled: z.boolean(),
+      emailEnabled: z.boolean(),
+      teamMinSize: z.number().int().min(1).max(100),
+      teamMaxSize: z.number().int().min(1).max(100),
+      submissionsEnabled: z.boolean(),
+      judgingEnabled: z.boolean(),
+    })
+    .refine((value) => value.teamMaxSize >= value.teamMinSize, {
+      message: "Maximum team size must be at least the minimum.",
+      path: ["teamMaxSize"],
+    }),
 });
 
 export const projectInput = z.object({
@@ -64,23 +84,25 @@ export const projectInput = z.object({
   contributorIds: z.array(z.string().uuid()).max(50),
 });
 
-export const announcementInput = z.object({
-  id: z.string().uuid().optional(),
-  title: z.string().trim().min(2).max(160),
-  body: z.string().trim().min(2).max(5000),
-  teamId: z.string().trim().max(40).nullable(),
-  pinned: z.boolean(),
-  published: z.boolean(),
-  mediaUrl: z.string().trim().max(1000).nullable(),
-  mediaType: z.enum(["image", "video"]).nullable(),
-}).superRefine((value, ctx) => {
-  if ((value.mediaUrl && !value.mediaType) || (!value.mediaUrl && value.mediaType)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Media URL and type must be provided together.",
-    });
-  }
-});
+export const announcementInput = z
+  .object({
+    id: z.string().uuid().optional(),
+    title: z.string().trim().min(2).max(160),
+    body: z.string().trim().min(2).max(5000),
+    teamId: z.string().trim().max(40).nullable(),
+    pinned: z.boolean(),
+    published: z.boolean(),
+    mediaUrl: z.string().trim().max(1000).nullable(),
+    mediaType: z.enum(["image", "video"]).nullable(),
+  })
+  .superRefine((value, ctx) => {
+    if ((value.mediaUrl && !value.mediaType) || (!value.mediaUrl && value.mediaType)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Media URL and type must be provided together.",
+      });
+    }
+  });
 
 export const badgeAwardInput = z.object({
   memberId: z.string().uuid(),
@@ -164,6 +186,36 @@ export const hackathonWorkspaceInput = z.object({
   minTeamSize: z.number().int().min(1).max(10),
   maxTeamSize: z.number().int().min(1).max(10),
   rules: z.string().trim().max(8000).nullable(),
+});
+
+const sarvamTeamMemberInput = z.object({
+  name: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().max(160),
+  phone: z.string().trim().max(30).optional().default(""),
+  usn: z.string().trim().max(40).optional().default(""),
+  college: z.string().trim().max(160).optional().default(""),
+  branch: z.string().trim().max(80).optional().default(""),
+  year: z.string().trim().max(20).optional().default(""),
+});
+
+export const sarvamHackathonRegistrationInput = z.object({
+  teamName: z.string().trim().min(2).max(100),
+  members: z.array(sarvamTeamMemberInput).length(4),
+  projectTitle: z.string().trim().min(2).max(160),
+  track: z.enum([
+    "Education and Learning",
+    "Healthcare and well being",
+    "Agriculture and rural Innovation",
+    "Security and developer tools",
+    "Open innovation",
+  ]),
+  problem: z.string().trim().min(20).max(1500),
+  solution: z.string().trim().min(20).max(2000),
+  innovation: z.string().trim().min(20).max(1500),
+  aiUse: z.string().trim().min(20).max(1500),
+  beneficiaries: z.string().trim().min(20).max(1500),
+  originalityConfirmed: z.literal(true),
+  rulesConfirmed: z.literal(true),
 });
 
 export const milestoneInput = z.object({

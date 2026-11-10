@@ -1,6 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { HackathonAdminNav } from "@/components/admin/HackathonAdminShell";
+import { NEURAL_NETWORK_WORKSHOP as workshopEvent } from "@/data/neural-network-workshop";
+import { createFileRoute, useRouter, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { AlertTriangle, CheckCircle2, RotateCcw, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 import { PhotoUpload } from "@/components/PhotoUpload";
@@ -22,6 +25,10 @@ import {
   saveEvent,
   saveMember,
   saveProject,
+  listEventStaffAccess,
+  saveEventStaffAccess,
+  revokeEventStaffAccess,
+  setEventRegistrationStatus,
   setApplicationStatus,
 } from "@/lib/admin.functions";
 import { checkInHackathonTeam, reissueHackathonTeamKey } from "@/lib/hackathon.functions";
@@ -41,8 +48,15 @@ import {
   revokeStaffInvite,
 } from "@/lib/staff.functions";
 import {
+  checkInNeuralNetworkWorkshop,
   listNeuralNetworkWorkshopRegistrations,
+  listNeuralNetworkWorkshopStaff,
+  revokeNeuralNetworkWorkshopStaff,
+  resendNeuralNetworkWorkshopPass,
+  saveNeuralNetworkWorkshopStaff,
+  setNeuralNetworkWorkshopStatus,
   type NeuralNetworkWorkshopRegistration,
+  type WorkshopStaff,
 } from "@/lib/neural-network-workshop.functions";
 import {
   hackathonAdmin,
@@ -51,15 +65,17 @@ import {
 } from "@/lib/hackathon.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
-  loader: () => adminOverview(),
+  loader: () => {
+    return adminOverview();
+  },
   head: () => ({
     meta: [
-      { title: "Admin console — Vertex" },
+      { title: "Admin console â Vertex" },
       {
         name: "description",
         content: "Manage the Vertex roster, events, projects, and door check-in.",
       },
-      { property: "og:title", content: "Admin console — Vertex" },
+      { property: "og:title", content: "Admin console â Vertex" },
       { property: "og:description", content: "Vertex staff tools." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
@@ -67,16 +83,19 @@ export const Route = createFileRoute("/_authenticated/admin")({
     ],
   }),
   component: AdminPage,
-  errorComponent: () => (
+  errorComponent: ({ error }) => (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
       <p className="max-w-sm text-center font-mono text-sm text-muted-foreground">
-        This console is for team heads and admins only.
+        {import.meta.env.DEV && error instanceof Error
+          ? error.message
+          : "This console is for team heads and admins only."}
       </p>
     </div>
   ),
 });
 
 const TABS = [
+  "Operations",
   "Check-in",
   "Neural Networks Workshop",
   "SIH",
@@ -86,6 +105,7 @@ const TABS = [
   "Members",
   "People",
   "Events",
+  "Build With Sarvam",
   "Projects",
   "Announcements",
 ] as const;
@@ -100,9 +120,22 @@ const slugify = (s: string) =>
 
 function AdminPage() {
   const data = Route.useLoaderData();
-  const [tab, setTab] = useState<Tab>("Check-in");
+  const router = useRouter();
   const isAdmin = data.viewer.isAdmin;
+  const isEventDesk = data.eventDesk;
+  const isWorkshopManager =
+    isEventDesk && data.deskScope === "workshop" && data.eventDeskPermission === "manager";
+  const [tab, setTab] = useState<Tab>(isWorkshopManager ? "Neural Networks Workshop" : "Check-in");
   const isJudgeOnly = data.viewer.isJudge && !data.viewer.isAdmin && !data.viewer.isHead;
+  const workshopApproved = data.workshopRegistrations.filter(
+    (row) => row.status === "approved",
+  ).length;
+  const workshopCheckedIn = data.workshopRegistrations.filter((row) => row.checked_in_at).length;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void router.invalidate(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [router]);
 
   if (isJudgeOnly) {
     return (
@@ -131,33 +164,39 @@ function AdminPage() {
       <div className="mx-auto max-w-6xl px-6 py-14">
         <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
           <span className="inline-block h-px w-8 bg-silver" />
-          {isAdmin ? "Admin" : "Team head"} console
-          {data.viewer.isJudge ? " · judge" : ""}
-          {data.viewer.isMentor ? " · mentor" : ""}
+          {isEventDesk ? "Event desk" : isAdmin ? "Admin" : "Team head"} console
+          {data.viewer.isJudge ? " Â· judge" : ""}
+          {data.viewer.isMentor ? " Â· mentor" : ""}
         </div>
         <h1 className="mt-5 font-display text-4xl font-semibold tracking-tight md:text-6xl">
           Control room.
         </h1>
+        {!isEventDesk && <HackathonAdminNav />}
 
-        <div className="mt-6 grid grid-cols-2 gap-px border border-hairline bg-hairline sm:grid-cols-4">
-          <Stat label="Applications" value={String(data.applications.length)} />
-          <Stat label="Members" value={String(data.members.length)} />
-          <Stat label="Registrations" value={String(data.registrations.length)} />
-          <Stat
-            label="Checked in"
-            value={String(data.registrations.filter((r) => r.checked_in_at).length)}
-          />
-        </div>
+        {!isEventDesk && (
+          <div className="mt-6 grid grid-cols-2 gap-px border border-hairline bg-hairline sm:grid-cols-3 lg:grid-cols-6">
+            <Stat label="Applications" value={String(data.applications.length)} />
+            <Stat label="Members" value={String(data.members.length)} />
+            <Stat label="Registrations" value={String(data.registrations.length)} />
+            <Stat
+              label="Checked in"
+              value={String(data.registrations.filter((r) => r.checked_in_at).length)}
+            />
+            <Stat label="Workshop approved" value={String(workshopApproved)} />
+            <Stat label="Workshop checked in" value={String(workshopCheckedIn)} />
+          </div>
+        )}
 
         <div className="mt-8 flex flex-wrap gap-2">
-          {TABS.filter(
-            (t) =>
-              isAdmin ||
-              t === "Check-in" ||
-              t === "SIH" ||
-              t === "Judging" ||
-              t === "Applications" ||
-              t === "Announcements",
+          {TABS.filter((t) =>
+            isEventDesk
+              ? t === "Check-in" || (isWorkshopManager && t === "Neural Networks Workshop")
+              : isAdmin ||
+                t === "Check-in" ||
+                t === "SIH" ||
+                t === "Judging" ||
+                t === "Applications" ||
+                t === "Announcements",
           ).map((t) => (
             <button
               key={t}
@@ -174,17 +213,44 @@ function AdminPage() {
         </div>
 
         <div className="mt-8">
-          {tab === "Check-in" && (
-            <CheckIn registrations={data.registrations} events={data.events} />
+          {tab === "Operations" && isAdmin && (
+            <EventCommandCentre
+              events={data.events}
+              registrations={data.registrations}
+              onOpenEvents={() => setTab("Events")}
+              onOpenCheckIn={() => setTab("Check-in")}
+              onOpenWorkshop={() => setTab("Neural Networks Workshop")}
+              workshop={{ approved: workshopApproved, checkedIn: workshopCheckedIn }}
+            />
           )}
-          {tab === "Neural Networks Workshop" && <NeuralNetworksWorkshopRegistrations />}
+          {tab === "Check-in" && (
+            <CheckIn
+              registrations={data.registrations}
+              events={data.events}
+              workshopOnly={data.eventDesk && data.deskScope === "workshop"}
+            />
+          )}
+          {tab === "Neural Networks Workshop" && (
+            <NeuralNetworksWorkshopRegistrations canManageDeskAccess={isAdmin} />
+          )}
           {tab === "SIH" && <SihOperations isAdmin={isAdmin} />}
           {tab === "Judging" && <Judging />}
           {tab === "Teams" && isAdmin && <Teams members={data.members} teams={data.teams} />}
           {tab === "People" && isAdmin && <People />}
           {tab === "Applications" && <Applications rows={data.applications} />}
           {tab === "Members" && <Members members={data.members} teams={data.teams} />}
-          {tab === "Events" && <Events events={data.events} />}
+          {tab === "Events" && <Events events={data.events} registrations={data.registrations} />}
+          {tab === "Build With Sarvam" && isAdmin && (
+            <BuildWithSarvamWorkspace
+              event={data.events.find((event) => event.slug === "build-with-sarvam")}
+              registrations={data.registrations.filter((registration) =>
+                data.events.some(
+                  (event) =>
+                    event.id === registration.event_id && event.slug === "build-with-sarvam",
+                ),
+              )}
+            />
+          )}
           {tab === "Projects" && <Projects projects={data.projects} members={data.members} />}
           {tab === "Announcements" && (
             <Announcements
@@ -201,25 +267,438 @@ function AdminPage() {
   );
 }
 
-function NeuralNetworksWorkshopRegistrations() {
-  const load = useServerFn(listNeuralNetworkWorkshopRegistrations);
-  const [rows, setRows] = useState<NeuralNetworkWorkshopRegistration[] | null>(null);
-  const [query, setQuery] = useState("");
+function EventCommandCentre({
+  events,
+  registrations,
+  workshop,
+  onOpenEvents,
+  onOpenCheckIn,
+  onOpenWorkshop,
+}: {
+  events: EventRow[];
+  registrations: {
+    id: string;
+    event_id: string;
+    name: string;
+    email: string;
+    status: "pending" | "approved" | "rejected" | "waitlisted";
+    checked_in_at: string | null;
+  }[];
+  workshop: { approved: number; checkedIn: number };
+  onOpenEvents: () => void;
+  onOpenCheckIn: () => void;
+  onOpenWorkshop: () => void;
+}) {
+  const operationalEvents = events.filter((event) => event.operations);
+  const [selectedId, setSelectedId] = useState(operationalEvents[0]?.id ?? "");
+  const selected =
+    operationalEvents.find((event) => event.id === selectedId) ?? operationalEvents[0];
+  const rows = selected
+    ? registrations.filter((registration) => registration.event_id === selected.id)
+    : [];
+  const approved = rows.filter((row) => row.status === "approved").length;
+  const pending = rows.filter((row) => row.status === "pending").length;
+  const waitlisted = rows.filter((row) => row.status === "waitlisted").length;
+  const checkedIn = rows.filter((row) => Boolean(row.checked_in_at)).length;
+  const operations = selected?.operations;
 
-  useEffect(() => {
-    load()
-      .then(setRows)
-      .catch(() => toast.error("Could not load workshop registrations."));
+  return (
+    <div className="grid gap-6">
+      <section className="overflow-hidden border border-hairline bg-card/40">
+        <div className="grid-backdrop border-b border-hairline p-6 md:p-8">
+          <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-silver">
+            Event command
+          </p>
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-5">
+            <div>
+              <h2 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">
+                Run the event from one place.
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                Readiness, registration status, and door operations stay event-scoped. Access is
+                managed only by club admins from the event settings.
+              </p>
+            </div>
+            <button className={ghost} onClick={onOpenEvents}>
+              Configure event →
+            </button>
+          </div>
+        </div>
+        <div className="p-5 md:p-7">
+          {operationalEvents.length === 0 ? (
+            <EmptyCommandState onOpenEvents={onOpenEvents} />
+          ) : (
+            <>
+              <label className="grid max-w-xl gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Event
+                </span>
+                <select
+                  value={selected?.id ?? ""}
+                  onChange={(event) => setSelectedId(event.target.value)}
+                  className={field}
+                >
+                  {operationalEvents.map((event) => (
+                    <option key={event.id} value={event.id}>
+                      {event.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mt-6 grid grid-cols-2 gap-px border border-hairline bg-hairline sm:grid-cols-5">
+                <CommandMetric label="Registered" value={rows.length} />
+                <CommandMetric
+                  label="Pending"
+                  value={pending}
+                  tone={pending > 0 ? "attention" : undefined}
+                />
+                <CommandMetric label="Approved" value={approved} />
+                <CommandMetric label="Waitlist" value={waitlisted} />
+                <CommandMetric
+                  label="Checked in"
+                  value={checkedIn}
+                  tone={checkedIn > 0 ? "good" : undefined}
+                />
+              </div>
+
+              <div className="mt-6 grid gap-5 lg:grid-cols-[1.15fr_.85fr]">
+                <div className="border border-hairline bg-background p-5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-display text-xl">Operational readiness</div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {selected?.event_date
+                          ? new Date(selected.event_date).toDateString()
+                          : "Date TBA"}{" "}
+                        · {selected?.location}
+                      </p>
+                    </div>
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-silver">
+                      {selected?.capacity ? `${rows.length}/${selected.capacity}` : "No capacity"}
+                    </span>
+                  </div>
+                  <div className="mt-5 grid gap-px border border-hairline bg-hairline sm:grid-cols-2">
+                    <Readiness
+                      label="Registration"
+                      value={operations?.registration_open ? "Open" : "Closed"}
+                      good={Boolean(operations?.registration_open)}
+                    />
+                    <Readiness
+                      label="Approval"
+                      value={operations?.requires_approval ? "Required" : "Automatic"}
+                      good={Boolean(operations?.requires_approval)}
+                    />
+                    <Readiness
+                      label="QR passes"
+                      value={operations?.passes_enabled ? "Enabled" : "Off"}
+                      good={Boolean(operations?.passes_enabled)}
+                    />
+                    <Readiness
+                      label="Door check-in"
+                      value={operations?.checkin_enabled ? "Ready" : "Off"}
+                      good={Boolean(operations?.checkin_enabled)}
+                    />
+                  </div>
+                </div>
+                <div className="border border-hairline bg-background p-5">
+                  <div className="font-display text-xl">Next action</div>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    {pending > 0
+                      ? `${pending} registration${pending === 1 ? " needs" : "s need"} review before a pass can be issued.`
+                      : operations?.registration_open
+                        ? "Registration is live. Keep the desk details and capacity current."
+                        : "Registration is closed. The door team can continue checking approved attendees in."}
+                  </p>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <button className={btn} onClick={onOpenEvents}>
+                      Review registrations
+                    </button>
+                    <button className={ghost} onClick={onOpenCheckIn}>
+                      Open check-in
+                    </button>
+                    <button
+                      className={ghost}
+                      disabled={!selected}
+                      onClick={() => selected && exportEventRegistrationsCsv(selected, rows)}
+                    >
+                      Export CSV
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+
+      <section className="border border-hairline bg-card/40 p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-silver">
+              Live workshop
+            </p>
+            <h2 className="mt-3 font-display text-2xl font-semibold">
+              Neural Networks from Scratch
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {workshopEvent.venue} · {workshopEvent.date} · {workshopEvent.time}
+            </p>
+          </div>
+          <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span>
+              <b className="text-foreground">{workshop.approved}</b> approved
+            </span>
+            <span>
+              <b className="text-foreground">{workshop.checkedIn}</b> checked in
+            </span>
+          </div>
+        </div>
+        <button className={`${ghost} mt-5`} onClick={onOpenWorkshop}>
+          Open workshop desk →
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function EmptyCommandState({ onOpenEvents }: { onOpenEvents: () => void }) {
+  return (
+    <div className="border border-dashed border-hairline p-6 text-sm text-muted-foreground">
+      Create an event first. Its registration, QR, capacity, and check-in rules will then appear
+      here as one operational view.
+      <button className={`${ghost} ml-4`} onClick={onOpenEvents}>
+        Create event →
+      </button>
+    </div>
+  );
+}
+
+function CommandMetric({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone?: "attention" | "good";
+}) {
+  return (
+    <div className="bg-background p-4">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={`mt-3 font-display text-3xl ${tone === "attention" ? "text-amber-200" : tone === "good" ? "text-emerald-300" : ""}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function Readiness({ label, value, good }: { label: string; value: string; good: boolean }) {
+  return (
+    <div className="bg-card/40 p-4">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={`mt-2 font-display text-lg ${good ? "text-emerald-300" : "text-muted-foreground"}`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function exportEventRegistrationsCsv(
+  event: EventRow,
+  rows: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+    checked_in_at: string | null;
+  }[],
+) {
+  const escape = (value: string | null | undefined) => `"${(value ?? "").replace(/"/g, '""')}"`;
+  const csv = [
+    ["event", "registration_id", "name", "email", "status", "checked_in_at"],
+    ...rows.map((row) => [
+      event.title,
+      row.id,
+      row.name,
+      row.email,
+      row.status,
+      row.checked_in_at ?? "",
+    ]),
+  ]
+    .map((row) => row.map(escape).join(","))
+    .join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `vertex-${event.slug}-registrations-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportSarvamRegistrationsCsv(
+  event: EventRow,
+  rows: {
+    id: string;
+    name: string;
+    email: string;
+    status: string;
+    created_at: string;
+    form_data: unknown;
+  }[],
+) {
+  const escape = (value: string | null | undefined) => `"${(value ?? "").replace(/"/g, '""')}"`;
+  const memberFields = ["name", "email", "phone", "usn", "college", "branch", "year"] as const;
+  const headers = [
+    "event",
+    "registration_id",
+    "team_name",
+    "team_lead_name",
+    "team_lead_email",
+    "status",
+    "registered_at",
+    "project_title",
+    "track",
+    "problem",
+    "solution",
+    "innovation",
+    "ai_use",
+    "beneficiaries",
+    ...Array.from({ length: 4 }, (_, index) =>
+      memberFields.map((field) => `member_${index + 1}_${field}`),
+    ).flat(),
+  ];
+  const csv = [
+    headers,
+    ...rows.map((row) => {
+      const details = readSarvamRegistrationDetails(row.form_data);
+      const memberValues = Array.from({ length: 4 }, (_, index) => {
+        const member = details.members[index];
+        return memberFields.map((field) => member?.[field] ?? "");
+      }).flat();
+      return [
+        event.title,
+        row.id,
+        details.teamName || `Team led by ${row.name}`,
+        row.name,
+        row.email,
+        row.status,
+        row.created_at,
+        details.projectTitle,
+        details.track,
+        details.problem,
+        details.solution,
+        details.innovation,
+        details.aiUse,
+        details.beneficiaries,
+        ...memberValues,
+      ];
+    }),
+  ]
+    .map((row) => row.map((value) => escape(String(value))).join(","))
+    .join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `vertex-${event.slug}-teams-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function NeuralNetworksWorkshopRegistrations({
+  canManageDeskAccess,
+}: {
+  canManageDeskAccess: boolean;
+}) {
+  const load = useServerFn(listNeuralNetworkWorkshopRegistrations);
+  const loadStaff = useServerFn(listNeuralNetworkWorkshopStaff);
+  const saveStaff = useServerFn(saveNeuralNetworkWorkshopStaff);
+  const revokeStaff = useServerFn(revokeNeuralNetworkWorkshopStaff);
+  const setStatus = useServerFn(setNeuralNetworkWorkshopStatus);
+  const resendPass = useServerFn(resendNeuralNetworkWorkshopPass);
+  const [rows, setRows] = useState<NeuralNetworkWorkshopRegistration[] | null>(null);
+  const [staff, setStaff] = useState<WorkshopStaff[]>([]);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">(
+    "pending",
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const refreshRegistrations = useCallback(async () => {
+    setRows(await load());
   }, [load]);
 
+  useEffect(() => {
+    Promise.all([
+      refreshRegistrations(),
+      canManageDeskAccess ? loadStaff() : Promise.resolve([] as WorkshopStaff[]),
+    ])
+      .then(([, eventStaff]) => setStaff(eventStaff))
+      .catch(() => toast.error("Could not load workshop registrations."));
+    const timer = window.setInterval(() => void refreshRegistrations(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [canManageDeskAccess, loadStaff, refreshRegistrations]);
+
   if (!rows) {
-    return <p className="font-mono text-xs text-muted-foreground">Loading workshop registrations…</p>;
+    return (
+      <p className="font-mono text-xs text-muted-foreground">Loading workshop registrationsâ¦</p>
+    );
   }
 
   const needle = query.trim().toLowerCase();
-  const filtered = rows.filter((row) =>
-    `${row.name} ${row.srn} ${row.department}`.toLowerCase().includes(needle),
+  const filtered = rows.filter(
+    (row) =>
+      (statusFilter === "all" || row.status === statusFilter) &&
+      `${row.name} ${row.srn} ${row.department} ${row.email}`.toLowerCase().includes(needle),
   );
+  const approved = rows.filter((row) => row.status === "approved").length;
+  const checkedIn = rows.filter((row) => Boolean(row.checked_in_at)).length;
+  const pending = rows.filter((row) => row.status === "pending").length;
+  const review = async (
+    row: NeuralNetworkWorkshopRegistration,
+    status: "approved" | "rejected",
+  ) => {
+    setBusyId(row.id);
+    try {
+      const result = await setStatus({ data: { id: row.id, status } });
+      await refreshRegistrations();
+      if (status === "approved") {
+        toast.success(
+          result.emailSent
+            ? "Approved â QR pass sent."
+            : "Approved â QR created, but email could not be sent. Use Resend after email setup is checked.",
+        );
+      } else {
+        toast.success("Registration rejected.");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update registration.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+  const resend = async (row: NeuralNetworkWorkshopRegistration) => {
+    setBusyId(row.id);
+    try {
+      await resendPass({ data: { id: row.id } });
+      await refreshRegistrations();
+      toast.success("QR pass resent.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not resend the QR pass.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <section className="grid gap-5 border border-hairline bg-card/40 p-6">
@@ -227,7 +706,8 @@ function NeuralNetworksWorkshopRegistrations() {
         <div>
           <div className="font-display text-xl">Neural Networks Workshop</div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {filtered.length === rows.length ? rows.length : `${filtered.length} of ${rows.length}`} registration{rows.length === 1 ? "" : "s"} · newest first
+            {filtered.length === rows.length ? rows.length : `${filtered.length} of ${rows.length}`}{" "}
+            registration{rows.length === 1 ? "" : "s"} Â· newest first
           </p>
         </div>
         <button
@@ -239,13 +719,135 @@ function NeuralNetworksWorkshopRegistrations() {
         </button>
       </div>
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <WorkshopStat label="Registered" value={rows.length} />
+        <WorkshopStat label="Approved" value={approved} tone="approved" />
+        <WorkshopStat label="Checked in" value={checkedIn} tone="checkedIn" />
+        <WorkshopStat label="Pending" value={pending} tone="pending" />
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(
+          [
+            ["pending", `Pending ${pending}`],
+            ["approved", `Approved ${approved}`],
+            ["rejected", `Rejected ${rows.filter((row) => row.status === "rejected").length}`],
+            ["all", `All ${rows.length}`],
+          ] as const
+        ).map(([status, label]) => (
+          <button
+            key={status}
+            type="button"
+            onClick={() => setStatusFilter(status)}
+            className={`border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+              statusFilter === status
+                ? "border-foreground bg-foreground text-background"
+                : "border-hairline bg-background text-muted-foreground hover:border-silver"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <input
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        placeholder="Search name, SRN or department…"
+        placeholder="Search name, SRN, email or departmentâ¦"
         aria-label="Search workshop registrations"
         className={`${field} w-full`}
       />
+
+      {canManageDeskAccess && (
+        <div className="border border-hairline bg-background p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-silver">
+                Event desk access
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Check-in access is limited to this workshopâs mobile desk. It never adds a club
+                admin role.
+              </p>
+            </div>
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = event.currentTarget;
+                const fields = new FormData(form);
+                void saveStaff({
+                  data: {
+                    email: String(fields.get("email") ?? ""),
+                    permission: String(fields.get("permission") ?? "checkin") as
+                      "manager" | "checkin" | "viewer",
+                    active: true,
+                  },
+                })
+                  .then(() => loadStaff())
+                  .then(setStaff)
+                  .then(() => form.reset())
+                  .catch((error) =>
+                    toast.error(error instanceof Error ? error.message : "Could not grant access."),
+                  );
+              }}
+            >
+              <label className="flex flex-col gap-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+                Email
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="clubmate@gmail.com"
+                  className={field}
+                />
+              </label>
+              <label className="flex flex-col gap-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+                Access
+                <select name="permission" defaultValue="checkin" className={field}>
+                  <option value="checkin">Check-in only</option>
+                  <option value="manager">Workshop manager</option>
+                </select>
+              </label>
+              <button className={btn}>Grant</button>
+            </form>
+          </div>
+          {staff.length > 0 && (
+            <div className="mt-4 grid gap-2">
+              {staff
+                .filter((member) => member.active)
+                .map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex flex-wrap items-center justify-between gap-3 border border-hairline bg-card/40 px-3 py-2"
+                  >
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {member.email} Â·{" "}
+                      {member.permission === "checkin" ? "check-in only" : member.permission}
+                    </span>
+                    <button
+                      type="button"
+                      className="border border-rose-500/50 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-rose-300 hover:bg-rose-950"
+                      onClick={() =>
+                        void revokeStaff({ data: { id: member.id } })
+                          .then(() => loadStaff())
+                          .then(setStaff)
+                          .then(() => toast.success("Event-desk access revoked."))
+                          .catch((error) =>
+                            toast.error(
+                              error instanceof Error ? error.message : "Could not revoke access.",
+                            ),
+                          )
+                      }
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="overflow-x-auto border border-hairline">
         <table className="w-full min-w-[1200px] border-collapse text-left text-xs">
@@ -261,6 +863,10 @@ function NeuralNetworksWorkshopRegistrations() {
                 "Year",
                 "Attend reason",
                 "Expectation",
+                "Status",
+                "Pass email",
+                "Activity",
+                "Actions",
                 "ID",
               ].map((heading) => (
                 <th key={heading} className="border-b border-hairline px-3 py-3">
@@ -286,6 +892,67 @@ function NeuralNetworksWorkshopRegistrations() {
                 </td>
                 <td className="max-w-sm whitespace-pre-wrap border-b border-hairline px-3 py-3">
                   {row.expectation}
+                </td>
+                <td className="border-b border-hairline px-3 py-3">
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-widest ${row.status === "approved" ? "text-emerald-300" : row.status === "rejected" ? "text-rose-300" : "text-amber-200"}`}
+                  >
+                    {row.status}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap border-b border-hairline px-3 py-3 font-mono text-[10px] text-muted-foreground">
+                  {row.pass_sent_at ? new Date(row.pass_sent_at).toLocaleString() : "Not sent"}
+                </td>
+                <td className="border-b border-hairline px-3 py-3">
+                  {row.activity.length === 0 ? (
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      No actions yet
+                    </span>
+                  ) : (
+                    <details className="min-w-40">
+                      <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-silver">
+                        {formatWorkshopActivity(row.activity[0])}
+                      </summary>
+                      <div className="mt-2 grid gap-1 border-l border-hairline pl-2 font-mono text-[10px] text-muted-foreground">
+                        {row.activity.map((activity) => (
+                          <span key={`${activity.action}-${activity.created_at}`}>
+                            {formatWorkshopActivity(activity)}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </td>
+                <td className="border-b border-hairline px-3 py-3">
+                  <div className="flex min-w-52 flex-wrap gap-2">
+                    {row.status !== "approved" && (
+                      <button
+                        className={btn}
+                        disabled={busyId === row.id}
+                        onClick={() => void review(row, "approved")}
+                      >
+                        Approve &amp; send QR
+                      </button>
+                    )}
+                    {row.status !== "rejected" && (
+                      <button
+                        className={ghost}
+                        disabled={busyId === row.id}
+                        onClick={() => void review(row, "rejected")}
+                      >
+                        Reject
+                      </button>
+                    )}
+                    {row.status === "approved" && (
+                      <button
+                        className={ghost}
+                        disabled={busyId === row.id}
+                        onClick={() => void resend(row)}
+                      >
+                        Resend QR
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td className="border-b border-hairline px-3 py-3 font-mono text-[10px] text-muted-foreground">
                   {row.id}
@@ -313,6 +980,43 @@ function Stat({ label, value }: { label: string; value: string }) {
       </div>
     </div>
   );
+}
+
+function WorkshopStat({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: number;
+  tone?: "default" | "approved" | "checkedIn" | "pending";
+}) {
+  const colors = {
+    default: "border-hairline bg-background",
+    approved: "border-emerald-700/40 bg-emerald-950/25",
+    checkedIn: "border-emerald-600 bg-emerald-600 text-white",
+    pending: "border-amber-500/50 bg-amber-100 text-slate-900",
+  };
+  return (
+    <div className={`border p-4 ${colors[tone]}`}>
+      <div className="font-display text-3xl font-semibold leading-none">{value}</div>
+      <div className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] opacity-75">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function formatWorkshopActivity(activity: NeuralNetworkWorkshopRegistration["activity"][number]) {
+  const label =
+    activity.action === "approved"
+      ? "Approved"
+      : activity.action === "rejected"
+        ? "Rejected"
+        : activity.action === "pass_sent"
+          ? "Pass sent"
+          : "Pass resent";
+  return `${label} Â· ${new Date(activity.created_at).toLocaleString()}`;
 }
 
 const field =
@@ -366,7 +1070,7 @@ function SihOperations({ isAdmin }: { isAdmin: boolean }) {
   const [psLimit, setPsLimit] = useState(30);
 
   if (!data) {
-    return <p className="font-mono text-xs text-muted-foreground">Loading SIH operations…</p>;
+    return <p className="font-mono text-xs text-muted-foreground">Loading SIH operationsâ¦</p>;
   }
 
   const checkedIn = new Set(data.checkins.map((entry) => entry.team_id));
@@ -459,7 +1163,7 @@ function SihOperations({ isAdmin }: { isAdmin: boolean }) {
                   <div>
                     <div className="font-display text-lg">{team.name}</div>
                     <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      {roster.length}/6 students ·{" "}
+                      {roster.length}/6 students Â·{" "}
                       {checkedIn.has(team.id) ? "checked in" : "not checked in"}
                     </p>
                     <p className="mt-2 text-xs text-muted-foreground">
@@ -470,20 +1174,20 @@ function SihOperations({ isAdmin }: { isAdmin: boolean }) {
                     {lead && (
                       <p className="mt-1 font-mono text-[10px] text-muted-foreground">
                         lead: {lead.email}
-                        {lead.phone ? ` · ${lead.phone}` : ""}
+                        {lead.phone ? ` Â· ${lead.phone}` : ""}
                       </p>
                     )}
                     {team.mentor_name && (
                       <p className="mt-1 font-mono text-[10px] text-silver">
                         mentor: {team.mentor_name}
-                        {team.mentor_email ? ` · ${team.mentor_email}` : ""}
+                        {team.mentor_email ? ` Â· ${team.mentor_email}` : ""}
                       </p>
                     )}
                     {submission?.solution_title && (
                       <div className="mt-2 border border-hairline p-3 text-xs">
                         <p className="text-silver">
-                          {submission.solution_title} · {submission.status}
-                          {submission.finalized_at ? " · final" : ""}
+                          {submission.solution_title} Â· {submission.status}
+                          {submission.finalized_at ? " Â· final" : ""}
                         </p>
                         <div className="mt-1 flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-widest">
                           {submission.deck_path && (
@@ -597,7 +1301,7 @@ function SihOperations({ isAdmin }: { isAdmin: boolean }) {
                       try {
                         const result = await reissueKey({ data: { teamId: team.id } });
                         await navigator.clipboard.writeText(result.token);
-                        toast.success("New team key copied to clipboard — hand it to the lead.");
+                        toast.success("New team key copied to clipboard â hand it to the lead.");
                       } catch (error) {
                         toast.error(
                           error instanceof Error ? error.message : "Could not reissue key.",
@@ -753,7 +1457,7 @@ function StatementsAdmin({
         <input
           value={filters.query}
           onChange={(event) => filters.setQuery(event.target.value)}
-          placeholder="Search code, title, ministry…"
+          placeholder="Search code, title, ministryâ¦"
           className={`${field} min-w-[200px] flex-1`}
         />
         <select
@@ -801,7 +1505,7 @@ function StatementsAdmin({
               <span className="ml-2">{statement.title}</span>
               <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                 {statement.category === "Hardware" ? "HW" : "SW"}
-                {statement.theme ? ` · ${statement.theme}` : ""}
+                {statement.theme ? ` Â· ${statement.theme}` : ""}
               </span>
             </div>
             <button
@@ -894,7 +1598,7 @@ function StatementsAdmin({
           <input type="checkbox" name="published" /> Publish to teams
         </label>
         <button className={`${btn} w-fit`} disabled={busy}>
-          {busy ? "Saving…" : "Save statement"}
+          {busy ? "Savingâ¦" : "Save statement"}
         </button>
       </form>
     </section>
@@ -903,9 +1607,69 @@ function StatementsAdmin({
 
 /* ---------------- check-in ---------------- */
 
+type DoorResult = {
+  tone: "ok" | "already" | "bad";
+  title: string;
+  name?: string;
+  meta?: string;
+  detail: string;
+};
+
+function DoorOutcome({ result, onScanNext }: { result: DoorResult; onScanNext: () => void }) {
+  const isSuccess = result.tone === "ok";
+  const isAlready = result.tone === "already";
+  const Icon = isSuccess ? CheckCircle2 : isAlready ? AlertTriangle : XCircle;
+  const colors = isSuccess
+    ? "border-emerald-500 bg-emerald-600 text-white"
+    : isAlready
+      ? "border-amber-400 bg-slate-950 text-white"
+      : "border-rose-500 bg-rose-700 text-white";
+
+  return (
+    <section
+      className={`overflow-hidden rounded-2xl border-2 shadow-[0_20px_60px_rgba(15,23,42,0.35)] ${colors}`}
+      aria-live="assertive"
+    >
+      <div className="p-7 text-center sm:p-10">
+        <Icon
+          className="mx-auto animate-[pulse_1.2s_ease-in-out_2]"
+          size={72}
+          strokeWidth={2.3}
+          aria-hidden
+        />
+        <p className="mt-6 font-mono text-xs font-bold uppercase tracking-[0.17em] opacity-80">
+          Vertex entry desk
+        </p>
+        <h2 className="mt-3 font-display text-5xl font-semibold leading-none sm:text-6xl">
+          {result.title}
+        </h2>
+        {result.name && (
+          <div className="mt-8 border-y border-white/25 py-5">
+            <p className="font-display text-3xl font-semibold leading-tight">{result.name}</p>
+            {result.meta && (
+              <p className="mt-2 font-mono text-sm font-semibold tracking-[0.12em]">
+                {result.meta}
+              </p>
+            )}
+          </div>
+        )}
+        <p className="mt-6 text-base leading-relaxed opacity-90">{result.detail}</p>
+      </div>
+      <button
+        type="button"
+        onClick={onScanNext}
+        className="flex w-full items-center justify-center gap-2 border-t border-white/25 bg-black/20 px-5 py-5 font-mono text-sm font-bold uppercase tracking-[0.12em] transition-colors hover:bg-black/35"
+      >
+        <RotateCcw size={18} /> Scan next attendee
+      </button>
+    </section>
+  );
+}
+
 function CheckIn({
   registrations,
   events,
+  workshopOnly = false,
 }: {
   registrations: {
     id: string;
@@ -915,12 +1679,12 @@ function CheckIn({
     checked_in_at: string | null;
   }[];
   events: { id: string; title: string }[];
+  workshopOnly?: boolean;
 }) {
-  const router = useRouter();
   const scan = useServerFn(checkInByCode);
   const scanSih = useServerFn(checkInHackathonTeam);
-  const [result, setResult] = useState<string | null>(null);
-  const [tone, setTone] = useState<"ok" | "warn" | "bad">("ok");
+  const scanWorkshop = useServerFn(checkInNeuralNetworkWorkshop);
+  const [result, setResult] = useState<DoorResult | null>(null);
   const [eventId, setEventId] = useState(events[0]?.id ?? "");
 
   const rows = registrations.filter((r) => r.event_id === eventId);
@@ -928,46 +1692,95 @@ function CheckIn({
 
   const processCode = async (rawCode: string) => {
     const code = rawCode.trim();
-    if (!code) return;
+    if (!code || result) return;
     try {
-      if (code.toUpperCase().includes("VTX-SIH:")) {
+      if (workshopOnly && !code.toUpperCase().includes("VTX-NN:")) {
+        setResult({
+          tone: "bad",
+          title: "Workshop pass required",
+          detail: "This desk is only for approved Neural Networks Workshop passes.",
+        });
+        return;
+      }
+      if (code.toUpperCase().includes("VTX-NN:")) {
+        const res = await scanWorkshop({ data: { code } });
+        if (res.status === "ok") {
+          setResult({
+            tone: "ok",
+            title: "Checked in",
+            name: res.name,
+            meta: res.srn,
+            detail: "Neural Networks Workshop Â· attendance recorded",
+          });
+        } else if (res.status === "already") {
+          setResult({
+            tone: "already",
+            title: "Already checked in",
+            name: res.name,
+            meta: res.srn,
+            detail: "This pass has already been used.",
+          });
+        } else {
+          setResult({
+            tone: "bad",
+            title: "Pass not accepted",
+            detail: "Unknown, pending, or unapproved workshop pass.",
+          });
+        }
+      } else if (code.toUpperCase().includes("VTX-SIH:")) {
         const res = await scanSih({ data: { code } });
         if (res.status === "ok") {
-          setTone("ok");
-          setResult(`✓ ${res.team} checked in · ${res.members.map((m) => m.name).join(", ")}`);
+          setResult({
+            tone: "ok",
+            title: "Checked in",
+            name: res.team,
+            detail: res.members.map((m) => m.name).join(", "),
+          });
         } else if (res.status === "already") {
-          setTone("warn");
-          setResult(
-            `! ${res.team} already checked in · ${res.members.map((m) => m.name).join(", ")}`,
-          );
+          setResult({
+            tone: "already",
+            title: "Already checked in",
+            name: res.team,
+            detail: res.members.map((m) => m.name).join(", "),
+          });
         } else {
-          setTone("bad");
-          setResult("✗ Unknown SIH team code");
+          setResult({ tone: "bad", title: "Pass not accepted", detail: "Unknown SIH team pass." });
         }
       } else {
         const res = await scan({ data: { code } });
         if (res.status === "ok") {
-          setTone("ok");
-          setResult(`✓ ${res.name} checked in · ${res.event}`);
+          setResult({ tone: "ok", title: "Checked in", name: res.name, detail: res.event });
         } else if (res.status === "already") {
-          setTone("warn");
-          setResult(`! ${res.name} already checked in`);
+          setResult({
+            tone: "already",
+            title: "Already checked in",
+            name: res.name,
+            detail: "This pass has already been used.",
+          });
         } else {
-          setTone("bad");
-          setResult("✗ Unknown pass code");
+          setResult({
+            tone: "bad",
+            title: "Pass not accepted",
+            detail: "Unknown or invalid pass.",
+          });
         }
       }
     } catch {
-      setTone("bad");
-      setResult("✗ Check-in failed");
+      setResult({
+        tone: "bad",
+        title: "Check-in failed",
+        detail: "Confirm your event-desk permission and try again.",
+      });
     }
-    await router.invalidate();
+    // Keep the result on screen until the volunteer explicitly starts the next scan.
+    // Invalidating the route here remounts this component and used to erase the
+    // attendee name immediately after a successful scan.
   };
 
   return (
     <div className="grid gap-8">
       <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:items-start">
-        <QRScanner onResult={(text) => void processCode(text)} />
+        <QRScanner onResult={(text) => void processCode(text)} paused={Boolean(result)} />
         <div className="space-y-4">
           <form
             className="flex flex-wrap items-end gap-3 border border-hairline bg-card/40 p-5"
@@ -983,60 +1796,65 @@ function CheckIn({
                 name="code"
                 required
                 className={`${field} w-80`}
-                placeholder="Type or paste…"
+                placeholder="Type or pasteâ¦"
               />
             </Label>
             <button className={btn}>Check in</button>
           </form>
-          {result && (
-            <div
-              className={`rounded-xl border p-4 font-mono text-sm leading-6 ${
-                tone === "ok"
-                  ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-200"
-                  : tone === "warn"
-                    ? "border-amber-300/40 bg-amber-300/10 text-amber-200"
-                    : "border-red-400/40 bg-red-400/10 text-red-300"
-              }`}
-            >
-              {result}
-            </div>
-          )}
+          {result && <DoorOutcome result={result} onScanNext={() => setResult(null)} />}
           <p className="max-w-md font-mono text-[10px] uppercase leading-5 tracking-widest text-muted-foreground">
-            Point the camera at a team's check-in QR. The same scan is ignored for a few seconds;
-            duplicates show as a warning instead of an error.
+            Scan a Vertex workshop or SIH pass, or paste its backup code. The same scan is ignored
+            for a few seconds; duplicates show as a warning instead of an error.
           </p>
         </div>
       </div>
 
-      <div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Label text="Event">
-            <select value={eventId} onChange={(e) => setEventId(e.target.value)} className={field}>
-              {events.map((e) => (
-                <option key={e.id} value={e.id} className="bg-background">
-                  {e.title}
-                </option>
-              ))}
-            </select>
-          </Label>
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-            {done} / {rows.length} attended
-          </span>
-        </div>
-        <div className="mt-4 flex flex-col gap-px border border-hairline bg-hairline">
-          {rows.map((r) => (
-            <div key={r.id} className="flex items-center justify-between gap-4 bg-background p-3">
-              <div>
-                <div className="font-display text-sm">{r.name}</div>
-                <div className="font-mono text-[10px] text-muted-foreground">{r.email}</div>
+      {!workshopOnly && (
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Label text="Event">
+              <select
+                value={eventId}
+                onChange={(e) => setEventId(e.target.value)}
+                className={field}
+              >
+                {events.map((e) => (
+                  <option key={e.id} value={e.id} className="bg-background">
+                    {e.title}
+                  </option>
+                ))}
+              </select>
+            </Label>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              {done} / {rows.length} attended
+            </span>
+          </div>
+          <div className="mt-4 flex flex-col gap-px border border-hairline bg-hairline">
+            {rows.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-4 bg-background p-3">
+                <div>
+                  <div className="font-display text-sm">{r.name}</div>
+                  <div className="font-mono text-[10px] text-muted-foreground">{r.email}</div>
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-silver">
+                  {r.checked_in_at ? "In" : "â"}
+                </span>
               </div>
-              <span className="font-mono text-[10px] uppercase tracking-widest text-silver">
-                {r.checked_in_at ? "In" : "—"}
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+      {workshopOnly && (
+        <div className="border border-hairline bg-card/40 p-5">
+          <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-silver">
+            Neural Networks Workshop desk
+          </p>
+          <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+            Scan an approved workshop QR pass. A clear result stays on screen until you choose “Scan
+            next attendee”, so the volunteer can verify the attendee name and SRN.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1068,7 +1886,7 @@ function Applications({
             <div>
               <div className="font-display text-lg">{a.name}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                {a.email} · {a.team_first ?? "—"} / {a.team_second ?? "—"} · {a.status}
+                {a.email} Â· {a.team_first ?? "â"} / {a.team_second ?? "â"} Â· {a.status}
               </div>
             </div>
             <div className="flex gap-2">
@@ -1190,7 +2008,7 @@ function TeamFilter({
           : "border-hairline text-muted-foreground hover:border-silver"
       }`}
     >
-      {label} · {count}
+      {label} Â· {count}
     </button>
   );
 }
@@ -1337,7 +2155,7 @@ function Members({
                 Social links
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                Add GitHub, LinkedIn, Instagram, or X for this member’s public profile.
+                Add GitHub, LinkedIn, Instagram, or X for this memberâs public profile.
               </p>
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -1368,7 +2186,7 @@ function Members({
           </div>
           <div className="flex gap-2 md:col-span-2">
             <button className={btn} disabled={busy}>
-              {busy ? "Saving…" : "Save member"}
+              {busy ? "Savingâ¦" : "Save member"}
             </button>
             <button type="button" className={ghost} onClick={() => setEditing(null)}>
               Cancel
@@ -1383,7 +2201,8 @@ function Members({
             <div className="min-w-0 flex-1">
               <div className="font-display text-base">{m.name}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                {m.role} · {teams.find((t) => t.id === m.team_id)?.name ?? "Leadership"} · /{m.slug}
+                {m.role} Â· {teams.find((t) => t.id === m.team_id)?.name ?? "Leadership"} Â· /
+                {m.slug}
               </div>
             </div>
             <button className={ghost} onClick={() => open(m)}>
@@ -1442,14 +2261,74 @@ type EventRow = {
   cover_url: string | null;
   capacity: number | null;
   published: boolean;
+  operations: {
+    registration_mode: "individual" | "team" | "disabled";
+    registration_open: boolean;
+    registration_opens_at: string | null;
+    registration_closes_at: string | null;
+    requires_approval: boolean;
+    waitlist_enabled: boolean;
+    passes_enabled: boolean;
+    checkin_enabled: boolean;
+    email_enabled: boolean;
+    team_min_size: number;
+    team_max_size: number;
+    submissions_enabled: boolean;
+    judging_enabled: boolean;
+  } | null;
 };
 
-function Events({ events }: { events: EventRow[] }) {
+const defaultEventOperations = {
+  registration_mode: "individual" as const,
+  registration_open: true,
+  registration_opens_at: null,
+  registration_closes_at: null,
+  requires_approval: false,
+  waitlist_enabled: false,
+  passes_enabled: true,
+  checkin_enabled: true,
+  email_enabled: false,
+  team_min_size: 1,
+  team_max_size: 1,
+  submissions_enabled: false,
+  judging_enabled: false,
+};
+
+const toLocalDateTime = (value: string | null) =>
+  value ? new Date(value).toISOString().slice(0, 16) : "";
+
+function Events({
+  events,
+  registrations,
+}: {
+  events: EventRow[];
+  registrations: {
+    id: string;
+    event_id: string;
+    name: string;
+    email: string;
+    status: "pending" | "approved" | "rejected" | "waitlisted";
+    checked_in_at: string | null;
+    created_at: string;
+    form_data: unknown;
+  }[];
+}) {
   const router = useRouter();
   const save = useServerFn(saveEvent);
+  const reviewRegistration = useServerFn(setEventRegistrationStatus);
   const [editing, setEditing] = useState<EventRow | null>(null);
   const [cover, setCover] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const sarvamEvent = events.find((event) => event.slug === "build-with-sarvam");
+  const sarvamRegistrations = sarvamEvent
+    ? registrations.filter((registration) => registration.event_id === sarvamEvent.id)
+    : [];
+  const genericRegistrations = registrations.filter(
+    (registration) =>
+      !events.some(
+        (event) => event.id === registration.event_id && event.slug === "build-with-sarvam",
+      ),
+  );
 
   const open = (e: EventRow | null) => {
     setEditing(
@@ -1466,6 +2345,7 @@ function Events({ events }: { events: EventRow[] }) {
           cover_url: null,
           capacity: null,
           published: true,
+          operations: defaultEventOperations,
         } as EventRow),
     );
     setCover(e?.cover_url ?? null);
@@ -1484,6 +2364,10 @@ function Events({ events }: { events: EventRow[] }) {
             e.preventDefault();
             const f = new FormData(e.currentTarget);
             const title = String(f.get("title") ?? "");
+            const toIso = (name: string) => {
+              const value = String(f.get(name) ?? "");
+              return value ? new Date(value).toISOString() : null;
+            };
             setBusy(true);
             try {
               await save({
@@ -1499,6 +2383,22 @@ function Events({ events }: { events: EventRow[] }) {
                   coverUrl: cover,
                   capacity: f.get("capacity") ? Number(f.get("capacity")) : null,
                   published: f.get("published") === "on",
+                  operations: {
+                    registrationMode: String(f.get("registrationMode") ?? "individual") as
+                      "individual" | "team" | "disabled",
+                    registrationOpen: f.get("registrationOpen") === "on",
+                    registrationOpensAt: toIso("registrationOpensAt"),
+                    registrationClosesAt: toIso("registrationClosesAt"),
+                    requiresApproval: f.get("requiresApproval") === "on",
+                    waitlistEnabled: f.get("waitlistEnabled") === "on",
+                    passesEnabled: f.get("passesEnabled") === "on",
+                    checkinEnabled: f.get("checkinEnabled") === "on",
+                    emailEnabled: f.get("emailEnabled") === "on",
+                    teamMinSize: Number(f.get("teamMinSize") ?? 1),
+                    teamMaxSize: Number(f.get("teamMaxSize") ?? 1),
+                    submissionsEnabled: f.get("submissionsEnabled") === "on",
+                    judgingEnabled: f.get("judgingEnabled") === "on",
+                  },
                 },
               });
               toast.success("Event saved.");
@@ -1562,9 +2462,11 @@ function Events({ events }: { events: EventRow[] }) {
               className={`${field} resize-none md:col-span-2`}
             />
           </Label>
+          <EventOperationsFields operations={editing.operations ?? defaultEventOperations} />
+          {editing.id && <EventStaffAccessPanel eventId={editing.id} />}
           <div className="flex gap-2 md:col-span-2">
             <button className={btn} disabled={busy}>
-              {busy ? "Saving…" : "Save event"}
+              {busy ? "Savingâ¦" : "Save event"}
             </button>
             <button type="button" className={ghost} onClick={() => setEditing(null)}>
               Cancel
@@ -1579,8 +2481,8 @@ function Events({ events }: { events: EventRow[] }) {
             <div>
               <div className="font-display text-base">{e.title}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                {e.event_date ? new Date(e.event_date).toDateString() : "Date TBA"} · {e.location} ·{" "}
-                {e.published ? "live" : "draft"}
+                {e.event_date ? new Date(e.event_date).toDateString() : "Date TBA"} Â· {e.location}{" "}
+                Â· {e.published ? "live" : "draft"}
               </div>
             </div>
             <button className={ghost} onClick={() => open(e)}>
@@ -1589,7 +2491,640 @@ function Events({ events }: { events: EventRow[] }) {
           </div>
         ))}
       </div>
+
+      <div className="border border-hairline bg-card/40 p-5">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div>
+            <div className="font-display text-xl">Registration review</div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Approve, waitlist or reject generic event registrations. Approved attendees can use
+              their existing QR code at the door.
+            </p>
+          </div>
+          <span className="font-mono text-[10px] uppercase tracking-widest text-silver">
+            {genericRegistrations.filter((r) => r.status === "pending").length} pending
+          </span>
+        </div>
+        <div className="mt-5 grid gap-2">
+          {genericRegistrations.map((registration) => {
+            const event = events.find((item) => item.id === registration.event_id);
+            return (
+              <div
+                key={registration.id}
+                className="flex flex-wrap items-center justify-between gap-3 border border-hairline bg-background p-3"
+              >
+                <div>
+                  <div className="font-medium">{registration.name}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    {event?.title ?? "Event"} · {registration.email} · {registration.status}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {registration.status !== "approved" && (
+                    <button
+                      className={btn}
+                      onClick={() =>
+                        void reviewRegistration({
+                          data: { id: registration.id, status: "approved" },
+                        })
+                          .then(() => router.invalidate())
+                          .catch(() => toast.error("Could not approve this registration."))
+                      }
+                    >
+                      Approve
+                    </button>
+                  )}
+                  {registration.status !== "waitlisted" && (
+                    <button
+                      className={ghost}
+                      onClick={() =>
+                        void reviewRegistration({
+                          data: { id: registration.id, status: "waitlisted" },
+                        })
+                          .then(() => router.invalidate())
+                          .catch(() => toast.error("Could not waitlist this registration."))
+                      }
+                    >
+                      Waitlist
+                    </button>
+                  )}
+                  {registration.status !== "rejected" && (
+                    <button
+                      className={ghost}
+                      onClick={() =>
+                        void reviewRegistration({
+                          data: { id: registration.id, status: "rejected" },
+                        })
+                          .then(() => router.invalidate())
+                          .catch(() => toast.error("Could not reject this registration."))
+                      }
+                    >
+                      Reject
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {genericRegistrations.length === 0 && (
+            <p className="font-mono text-xs text-muted-foreground">
+              No generic event registrations yet.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {sarvamEvent && (
+        <SarvamRegistrationSection
+          event={sarvamEvent}
+          registrations={sarvamRegistrations}
+          onStatusChange={async (id, status) => {
+            try {
+              const result = await reviewRegistration({ data: { id, status } });
+              if (status === "approved" && !result.emailSent) {
+                toast.error(
+                  "Registration approved, but the team-lead email could not be sent. Check the email provider settings.",
+                );
+              } else {
+                toast.success(`Registration ${status}.`);
+              }
+              await router.invalidate();
+            } catch {
+              toast.error("Could not update this Sarvam registration.");
+            }
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+type SarvamMember = {
+  name: string;
+  email: string;
+  phone?: string;
+  usn?: string;
+  college?: string;
+  branch?: string;
+  year?: string;
+  is_lead?: boolean;
+};
+
+type SarvamRegistrationDetails = {
+  teamName: string;
+  members: SarvamMember[];
+  projectTitle: string;
+  track: string;
+  problem: string;
+  solution: string;
+  innovation: string;
+  aiUse: string;
+  beneficiaries: string;
+};
+
+function readSarvamRegistrationDetails(value: unknown): SarvamRegistrationDetails {
+  if (!value || typeof value !== "object") {
+    return {
+      teamName: "",
+      members: [],
+      projectTitle: "",
+      track: "",
+      problem: "",
+      solution: "",
+      innovation: "",
+      aiUse: "",
+      beneficiaries: "",
+    };
+  }
+  const data = value as Record<string, unknown>;
+  const members = Array.isArray(data.members)
+    ? data.members.flatMap((member) => {
+        if (!member || typeof member !== "object") return [];
+        const row = member as Record<string, unknown>;
+        if (typeof row.name !== "string" || typeof row.email !== "string") return [];
+        return [
+          {
+            name: row.name,
+            email: row.email,
+            phone: typeof row.phone === "string" ? row.phone : undefined,
+            usn: typeof row.usn === "string" ? row.usn : undefined,
+            college: typeof row.college === "string" ? row.college : undefined,
+            branch: typeof row.branch === "string" ? row.branch : undefined,
+            year: typeof row.year === "string" ? row.year : undefined,
+            is_lead: row.is_lead === true,
+          },
+        ];
+      })
+    : [];
+
+  return {
+    teamName: typeof data.team_name === "string" ? data.team_name : "",
+    members,
+    projectTitle: typeof data.project_title === "string" ? data.project_title : "",
+    track: typeof data.track === "string" ? data.track : "",
+    problem: typeof data.problem === "string" ? data.problem : "",
+    solution: typeof data.solution === "string" ? data.solution : "",
+    innovation: typeof data.innovation === "string" ? data.innovation : "",
+    aiUse: typeof data.ai_use === "string" ? data.ai_use : "",
+    beneficiaries: typeof data.beneficiaries === "string" ? data.beneficiaries : "",
+  };
+}
+
+function BuildWithSarvamWorkspace({
+  event,
+  registrations,
+}: {
+  event?: EventRow;
+  registrations: {
+    id: string;
+    name: string;
+    email: string;
+    status: "pending" | "approved" | "rejected" | "waitlisted";
+    created_at: string;
+    form_data: unknown;
+  }[];
+}) {
+  const router = useRouter();
+  const reviewRegistration = useServerFn(setEventRegistrationStatus);
+  const participants = registrations.reduce((total, registration) => {
+    return total + readSarvamRegistrationDetails(registration.form_data).members.length;
+  }, 0);
+  const pending = registrations.filter((registration) => registration.status === "pending").length;
+  const approved = registrations.filter(
+    (registration) => registration.status === "approved",
+  ).length;
+
+  if (!event) {
+    return (
+      <section className="border border-dashed border-hairline p-6 text-sm text-muted-foreground">
+        The BUILD WITH SARVAM event workspace is not available yet.
+      </section>
+    );
+  }
+
+  return (
+    <div className="grid gap-6">
+      <section className="overflow-hidden border border-silver/40 bg-card/40">
+        <div className="grid-backdrop border-b border-hairline p-6 md:p-8">
+          <div className="flex flex-wrap items-start justify-between gap-5">
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-silver">
+                Event workspace
+              </p>
+              <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight md:text-4xl">
+                BUILD WITH SARVAM
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                Persistent team registration records for the Sarvam AI hackathon. Review the team
+                lead and every submitted member from this workspace.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={btn}
+                onClick={() => exportSarvamRegistrationsCsv(event, registrations)}
+              >
+                Download CSV
+              </button>
+              <a
+                className={ghost}
+                href="/events/build-with-sarvam"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open public page →
+              </a>
+            </div>
+          </div>
+          <div className="mt-6 flex flex-wrap gap-4 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            <span>{event.location}</span>
+            <span>13–14 November</span>
+            <span>Team size exactly 4</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-px border-b border-hairline bg-hairline sm:grid-cols-4">
+          <CommandMetric label="Teams" value={registrations.length} />
+          <CommandMetric label="Participants" value={participants} />
+          <CommandMetric
+            label="Pending review"
+            value={pending}
+            tone={pending > 0 ? "attention" : undefined}
+          />
+          <CommandMetric label="Approved" value={approved} />
+        </div>
+      </section>
+
+      <SarvamRegistrationSection
+        event={event}
+        registrations={registrations}
+        onStatusChange={async (id, status) => {
+          try {
+            const result = await reviewRegistration({ data: { id, status } });
+            if (status === "approved" && !result.emailSent) {
+              toast.error(
+                "Registration approved, but the team-lead email could not be sent. Check the email provider settings.",
+              );
+            } else {
+              toast.success(`Registration ${status}.`);
+            }
+            await router.invalidate();
+          } catch {
+            toast.error("Could not update this Sarvam registration.");
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function SarvamRegistrationSection({
+  event,
+  registrations,
+  onStatusChange,
+}: {
+  event: EventRow;
+  registrations: {
+    id: string;
+    name: string;
+    email: string;
+    status: "pending" | "approved" | "rejected" | "waitlisted";
+    created_at: string;
+    form_data: unknown;
+  }[];
+  onStatusChange: (id: string, status: "approved" | "waitlisted" | "rejected") => Promise<void>;
+}) {
+  const participants = registrations.reduce((total, registration) => {
+    return total + readSarvamRegistrationDetails(registration.form_data).members.length;
+  }, 0);
+  const pending = registrations.filter((registration) => registration.status === "pending").length;
+
+  return (
+    <section className="border border-silver/40 bg-card/40 p-5 md:p-7">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-hairline pb-5">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-silver">
+            Hackathon registrations
+          </p>
+          <h2 className="mt-3 font-display text-2xl font-semibold">BUILD WITH SARVAM</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Team rosters submitted through the Sarvam workspace · {event.location}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-4 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          <span>
+            <b className="text-foreground">{registrations.length}</b> teams
+          </span>
+          <span>
+            <b className="text-foreground">{participants}</b> participants
+          </span>
+          <span>
+            <b className="text-foreground">{pending}</b> pending
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4">
+        {registrations.map((registration) => {
+          const details = readSarvamRegistrationDetails(registration.form_data);
+          const teamName = details.teamName || `Team led by ${registration.name}`;
+          return (
+            <article
+              key={registration.id}
+              className="border border-hairline bg-background p-4 md:p-5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-display text-xl font-semibold">{teamName}</h3>
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                    Lead: {registration.name} · {registration.email} · Registered{" "}
+                    {new Date(registration.created_at).toLocaleString()}
+                  </p>
+                </div>
+                <span className="border border-hairline px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-silver">
+                  {registration.status}
+                </span>
+              </div>
+
+              {details.members.length > 0 ? (
+                <div className="mt-5 grid gap-px border border-hairline bg-hairline sm:grid-cols-2 lg:grid-cols-4">
+                  {details.members.map((member) => (
+                    <div key={`${registration.id}-${member.email}`} className="bg-card/50 p-4">
+                      <div className="flex items-center gap-2 font-medium">
+                        {member.name}
+                        {member.is_lead && (
+                          <span className="font-mono text-[9px] uppercase tracking-widest text-silver">
+                            Lead
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-2 break-all font-mono text-[10px] text-muted-foreground">
+                        {member.email}
+                      </div>
+                      <div className="mt-3 grid gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                        {member.phone && <span>Phone · {member.phone}</span>}
+                        {member.usn && <span>USN · {member.usn}</span>}
+                        {member.college && <span>College · {member.college}</span>}
+                        {(member.branch || member.year) && (
+                          <span>{[member.branch, member.year].filter(Boolean).join(" · ")}</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-muted-foreground">
+                  No member roster data available.
+                </p>
+              )}
+
+              {details.projectTitle && (
+                <div className="mt-5 grid gap-4 border border-hairline bg-background p-4 md:grid-cols-2">
+                  <div className="md:col-span-2">
+                    <div className="font-mono text-[9px] uppercase tracking-widest text-silver">
+                      Idea submission
+                    </div>
+                    <h4 className="mt-2 font-display text-2xl">{details.projectTitle}</h4>
+                    {details.track && (
+                      <p className="mt-1 text-xs text-muted-foreground">Track · {details.track}</p>
+                    )}
+                  </div>
+                  {[
+                    ["Problem", details.problem],
+                    ["Proposed solution", details.solution],
+                    ["Innovation", details.innovation],
+                    ["AI usage", details.aiUse],
+                    ["Beneficiaries & impact", details.beneficiaries],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-lg border border-hairline bg-card/50 p-3">
+                      <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">
+                        {label}
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {registration.status !== "approved" && (
+                  <button
+                    className={btn}
+                    onClick={() => void onStatusChange(registration.id, "approved")}
+                  >
+                    Approve
+                  </button>
+                )}
+                {registration.status !== "waitlisted" && (
+                  <button
+                    className={ghost}
+                    onClick={() => void onStatusChange(registration.id, "waitlisted")}
+                  >
+                    Waitlist
+                  </button>
+                )}
+                {registration.status !== "rejected" && (
+                  <button
+                    className={ghost}
+                    onClick={() => void onStatusChange(registration.id, "rejected")}
+                  >
+                    Reject
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {registrations.length === 0 && (
+          <p className="font-mono text-xs text-muted-foreground">
+            No BUILD WITH SARVAM registrations yet.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function EventOperationsFields({
+  operations,
+}: {
+  operations: NonNullable<EventRow["operations"]>;
+}) {
+  return (
+    <fieldset className="grid gap-4 border border-hairline bg-background/60 p-4 md:col-span-2">
+      <legend className="px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-silver">
+        Registration &amp; event operations
+      </legend>
+      <p className="text-sm text-muted-foreground">
+        Configure the workflow once here. The public registration, pass, check-in and future team
+        tools use these rules instead of a one-off event build.
+      </p>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Label text="Registration type">
+          <select
+            name="registrationMode"
+            defaultValue={operations.registration_mode}
+            className={field}
+          >
+            <option value="individual">Individual</option>
+            <option value="team">Team</option>
+            <option value="disabled">No registration</option>
+          </select>
+        </Label>
+        <Label text="Registration opens">
+          <input
+            name="registrationOpensAt"
+            type="datetime-local"
+            defaultValue={toLocalDateTime(operations.registration_opens_at)}
+            className={field}
+          />
+        </Label>
+        <Label text="Registration closes">
+          <input
+            name="registrationClosesAt"
+            type="datetime-local"
+            defaultValue={toLocalDateTime(operations.registration_closes_at)}
+            className={field}
+          />
+        </Label>
+      </div>
+      <div className="grid gap-x-6 gap-y-3 md:grid-cols-3">
+        {[
+          ["registrationOpen", "Registration is open", operations.registration_open],
+          ["requiresApproval", "Require approval before pass", operations.requires_approval],
+          ["waitlistEnabled", "Allow waitlist", operations.waitlist_enabled],
+          ["passesEnabled", "Issue QR passes", operations.passes_enabled],
+          ["checkinEnabled", "Enable door check-in", operations.checkin_enabled],
+          ["emailEnabled", "Send event email", operations.email_enabled],
+          ["submissionsEnabled", "Collect submissions", operations.submissions_enabled],
+          ["judgingEnabled", "Enable judging", operations.judging_enabled],
+        ].map(([name, label, checked]) => (
+          <label
+            key={String(name)}
+            className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
+          >
+            <input name={String(name)} type="checkbox" defaultChecked={Boolean(checked)} />
+            {String(label)}
+          </label>
+        ))}
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Label text="Minimum team size">
+          <input
+            name="teamMinSize"
+            type="number"
+            min="1"
+            max="100"
+            defaultValue={operations.team_min_size}
+            className={field}
+          />
+        </Label>
+        <Label text="Maximum team size">
+          <input
+            name="teamMaxSize"
+            type="number"
+            min="1"
+            max="100"
+            defaultValue={operations.team_max_size}
+            className={field}
+          />
+        </Label>
+      </div>
+    </fieldset>
+  );
+}
+
+function EventStaffAccessPanel({ eventId }: { eventId: string }) {
+  const list = useServerFn(listEventStaffAccess);
+  const save = useServerFn(saveEventStaffAccess);
+  const revoke = useServerFn(revokeEventStaffAccess);
+  const [staff, setStaff] = useState<
+    { id: string; email: string; permission: "manager" | "checkin" | "viewer"; active: boolean }[]
+  >([]);
+
+  const refresh = useCallback(() => list({ data: { eventId } }).then(setStaff), [eventId, list]);
+  useEffect(() => {
+    void refresh().catch(() => toast.error("Could not load event access."));
+  }, [refresh]);
+
+  return (
+    <section className="grid gap-4 border border-hairline bg-background/60 p-4 md:col-span-2">
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-silver">
+          Event monitoring access
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Grant an email access to this event only. It does not create a Vertex admin account.
+          Check-in staff can scan passes; managers can run the event desk; viewers are reserved for
+          read-only monitoring.
+        </p>
+      </div>
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const fields = new FormData(form);
+          void save({
+            data: {
+              eventId,
+              email: String(fields.get("eventStaffEmail") ?? ""),
+              permission: String(fields.get("eventStaffPermission") ?? "checkin") as
+                "manager" | "checkin" | "viewer",
+            },
+          })
+            .then(() => refresh())
+            .then(() => form.reset())
+            .then(() => toast.success("Event access granted."))
+            .catch((error) =>
+              toast.error(error instanceof Error ? error.message : "Could not grant access."),
+            );
+        }}
+      >
+        <Label text="Volunteer email">
+          <input
+            name="eventStaffEmail"
+            type="email"
+            required
+            placeholder="member@gmail.com"
+            className={field}
+          />
+        </Label>
+        <Label text="Access">
+          <select name="eventStaffPermission" defaultValue="checkin" className={field}>
+            <option value="checkin">Check-in only</option>
+            <option value="manager">Event manager</option>
+            <option value="viewer">Viewer</option>
+          </select>
+        </Label>
+        <button className={btn}>Grant access</button>
+      </form>
+      {staff
+        .filter((person) => person.active)
+        .map((person) => (
+          <div
+            key={person.id}
+            className="flex flex-wrap items-center justify-between gap-3 border border-hairline bg-card/40 px-3 py-2"
+          >
+            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              {person.email} ·{" "}
+              {person.permission === "checkin" ? "check-in only" : person.permission}
+            </span>
+            <button
+              type="button"
+              className="border border-rose-500/50 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-rose-300 hover:bg-rose-950"
+              onClick={() =>
+                void revoke({ data: { id: person.id } })
+                  .then(refresh)
+                  .then(() => toast.success("Event access revoked."))
+                  .catch(() => toast.error("Could not revoke access."))
+              }
+            >
+              Revoke
+            </button>
+          </div>
+        ))}
+    </section>
   );
 }
 
@@ -1737,7 +3272,7 @@ function Projects({ projects, members }: { projects: ProjectRow[]; members: Memb
           </div>
           <div className="flex gap-2 md:col-span-2">
             <button className={btn} disabled={busy}>
-              {busy ? "Saving…" : "Save project"}
+              {busy ? "Savingâ¦" : "Save project"}
             </button>
             <button type="button" className={ghost} onClick={() => setEditing(null)}>
               Cancel
@@ -1752,7 +3287,7 @@ function Projects({ projects, members }: { projects: ProjectRow[]; members: Memb
             <div>
               <div className="font-display text-base">{p.title}</div>
               <div className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                {p.year ?? "—"} · {p.published ? "live" : "draft"}
+                {p.year ?? "â"} Â· {p.published ? "live" : "draft"}
               </div>
             </div>
             <button className={ghost} onClick={() => open(p)}>
@@ -1866,7 +3401,7 @@ function Announcements({
             <input type="checkbox" name="pinned" /> Pin to top
           </label>
           <button className={btn} disabled={busy}>
-            {busy ? "Posting…" : "Post announcement"}
+            {busy ? "Postingâ¦" : "Post announcement"}
           </button>
         </div>
       </form>
@@ -1880,7 +3415,7 @@ function Announcements({
                 {a.team_id
                   ? (teams.find((t) => t.id === a.team_id)?.name ?? a.team_id)
                   : "Club-wide"}{" "}
-                · {new Date(a.created_at).toDateString()}
+                Â· {new Date(a.created_at).toDateString()}
               </div>
               <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{a.body}</p>
               {a.media_url && (
@@ -1926,7 +3461,7 @@ function Judging() {
       .catch(() => toast.error("Could not load judging data."));
   }, [load]);
 
-  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loading judging…</p>;
+  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loading judgingâ¦</p>;
   if (data.teams.length === 0)
     return <p className="font-mono text-xs text-muted-foreground">No teams to judge yet.</p>;
 
@@ -1941,7 +3476,7 @@ function Judging() {
         <div className="font-display text-xl">Leaderboard</div>
         <p className="mt-1 text-sm text-muted-foreground">
           Weighted average across all judges. Criteria weights:{" "}
-          {data.criteria.map((c) => `${c.name.split(" ")[0]} ×${c.weight}`).join(", ")}
+          {data.criteria.map((c) => `${c.name.split(" ")[0]} Ã${c.weight}`).join(", ")}
         </p>
         <div className="mt-4 flex flex-col gap-px border border-hairline bg-hairline">
           {data.leaderboard.map((row, index) => (
@@ -1954,14 +3489,14 @@ function Judging() {
             >
               <span className="flex items-center gap-3">
                 <span className="w-6 text-right font-mono text-[10px] text-muted-foreground">
-                  {row.scoreTotal === null ? "—" : `#${index + 1}`}
+                  {row.scoreTotal === null ? "â" : `#${index + 1}`}
                 </span>
                 <span className="font-display text-sm">{row.name}</span>
               </span>
               <span className="font-mono text-xs text-silver">
                 {row.scoreTotal === null
                   ? "not scored"
-                  : `${row.scoreTotal}/10 · ${row.judgeCount} judge${row.judgeCount === 1 ? "" : "s"}`}
+                  : `${row.scoreTotal}/10 Â· ${row.judgeCount} judge${row.judgeCount === 1 ? "" : "s"}`}
               </span>
             </button>
           ))}
@@ -1992,7 +3527,7 @@ function Judging() {
                   <div>
                     <div className="text-sm">{criterion.name}</div>
                     <div className="mt-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                      0–{criterion.max_score} points · weight ×{criterion.weight}
+                      0â{criterion.max_score} points Â· weight Ã{criterion.weight}
                     </div>
                   </div>
                   <input
@@ -2106,7 +3641,7 @@ function AccessCodes() {
       <div className="border border-hairline bg-card/40 p-6">
         <div className="font-display text-xl">Issue a verification code</div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Hand a code to a judge or mentor you trust. They enter it once at sign-up — no code, no
+          Hand a code to a judge or mentor you trust. They enter it once at sign-up â no code, no
           staff access.
         </p>
         <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -2173,7 +3708,7 @@ function AccessCodes() {
               <span className="font-mono text-sm tracking-widest">{invite.code}</span>
               <span className="ml-3 font-mono text-[10px] uppercase tracking-widest text-silver">
                 {invite.role}
-                {invite.label ? ` · ${invite.label}` : ""}
+                {invite.label ? ` Â· ${invite.label}` : ""}
               </span>
             </div>
             <div className="flex items-center gap-3">
@@ -2223,7 +3758,7 @@ function MentorshipAdmin() {
       .catch(() => toast.error("Could not load mentorship."));
   }, [load]);
 
-  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loading…</p>;
+  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loadingâ¦</p>;
 
   return (
     <div className="flex flex-col gap-px border border-hairline bg-hairline">
@@ -2234,7 +3769,7 @@ function MentorshipAdmin() {
         >
           <div>
             <div className="text-sm">
-              {request.mentee} → {request.mentor}
+              {request.mentee} â {request.mentor}
             </div>
             <div className="font-mono text-[10px] text-muted-foreground">{request.topic}</div>
           </div>
@@ -2271,7 +3806,7 @@ function StaffRoles() {
       .catch(() => toast.error("Could not load roles."));
   }, [load]);
 
-  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loading roles…</p>;
+  if (!data) return <p className="font-mono text-xs text-muted-foreground">Loading rolesâ¦</p>;
 
   const roleOf = (userId: string) => data.roles.find((r) => r.userId === userId)?.role ?? "none";
 
@@ -2292,7 +3827,7 @@ function StaffRoles() {
               <div className="font-display text-sm">{member.name}</div>
               <div className="font-mono text-[10px] text-muted-foreground">
                 /{member.slug}
-                {member.isHead ? " · roster head" : ""}
+                {member.isHead ? " Â· roster head" : ""}
               </div>
             </div>
             <select
@@ -2439,6 +3974,9 @@ function exportWorkshopRegistrationsCsv(rows: NeuralNetworkWorkshopRegistration[
       "year",
       "attend_reason",
       "expectation",
+      "status",
+      "checked_in_at",
+      "pass_sent_at",
     ],
     ...rows.map((row) => [
       row.id,
@@ -2451,6 +3989,9 @@ function exportWorkshopRegistrationsCsv(rows: NeuralNetworkWorkshopRegistration[
       row.year,
       row.attend_reason,
       row.expectation,
+      row.status,
+      row.checked_in_at ?? "",
+      row.pass_sent_at ?? "",
     ]),
   ];
   const csv = values

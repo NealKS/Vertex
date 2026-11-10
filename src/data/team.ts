@@ -18,7 +18,7 @@ export type Team = {
   name: string;
   code: string;
   blurb: string | null;
-  head?: Member;
+  heads: Member[];
   members: Member[];
 };
 

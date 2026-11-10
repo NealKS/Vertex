@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
+import { useLiveData } from "@/hooks/use-live-data";
 import { useMemo, useState } from "react";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
-import { getAnnouncements } from "@/lib/public.functions";
+import { getAnnouncements } from "@/lib/hackathon-admin.api";
 
 export const Route = createFileRoute("/announcements")({
   loader: () => getAnnouncements(),
@@ -31,7 +33,14 @@ export const Route = createFileRoute("/announcements")({
 });
 
 function AnnouncementsPage() {
-  const { items, teams } = Route.useLoaderData();
+  const initial = Route.useLoaderData();
+  const fetchFeed = useServerFn(getAnnouncements);
+  const { data, error, liveLabel } = useLiveData(
+    initial,
+    fetchFeed,
+    "announcements,event_announcements",
+  );
+  const { items, teams } = data ?? { items: [], teams: [] };
   const [team, setTeam] = useState("all");
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const feed = items.filter((a) => team === "all" || (a.team_id ?? "club") === team);
@@ -44,7 +53,7 @@ function AnnouncementsPage() {
         <div className="relative mx-auto max-w-4xl px-6 py-20">
           <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">
             <span className="inline-block h-px w-8 bg-silver" />
-            Feed
+            Feed · {liveLabel}
           </div>
           <h1 className="mt-6 font-display text-5xl font-semibold leading-[0.95] tracking-tight md:text-7xl">
             Announcements.
@@ -68,6 +77,11 @@ function AnnouncementsPage() {
             )}
           </div>
 
+          {error && (
+            <p role="alert" className="mt-6 text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <div className="mt-10 flex flex-col gap-px border border-hairline bg-hairline">
             {feed.map((a) => (
               <article key={a.id} className="bg-background p-6">

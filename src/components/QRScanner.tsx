@@ -8,16 +8,27 @@ type ScannerState = "idle" | "starting" | "scanning" | "error";
 export function QRScanner({
   onResult,
   cooldownMs = 2500,
+  autoStart = false,
+  paused = false,
 }: {
   onResult: (text: string) => void;
   cooldownMs?: number;
+  autoStart?: boolean;
+  paused?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const decodingRef = useRef(false);
+  const pausedRef = useRef(paused);
+  const autoStartedRef = useRef(false);
   const lastResult = useRef<{ text: string; at: number }>({ text: "", at: 0 });
   const [state, setState] = useState<ScannerState>("idle");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
 
   const stop = useCallback(() => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -71,29 +82,34 @@ export function QRScanner({
 
       const canvas = document.createElement("canvas");
       const context = canvas.getContext("2d", { willReadFrequently: true });
+      // Load the Safari fallback once, rather than starting a dynamic import for
+      // every camera frame. That was the main source of missed/laggy scans.
+      const jsQr = detector ? null : (await import("jsqr")).default;
 
       const tick = async () => {
-        if (!streamRef.current || !video.videoWidth) {
+        if (!streamRef.current || !video.videoWidth || decodingRef.current || pausedRef.current) {
           rafRef.current = requestAnimationFrame(() => void tick());
           return;
         }
-        if (detector) {
-          try {
+        decodingRef.current = true;
+        try {
+          if (detector) {
             const codes = await detector.detect(video);
             if (codes.length > 0) handleDetection(codes[0].rawValue);
-          } catch {
-            /* transient decode errors are normal */
+          } else if (context && jsQr) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0);
+            const image = context.getImageData(0, 0, canvas.width, canvas.height);
+            const found = jsQr(image.data, image.width, image.height, {
+              inversionAttempts: "dontInvert",
+            });
+            if (found?.data) handleDetection(found.data);
           }
-        } else if (context) {
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          context.drawImage(video, 0, 0);
-          const { default: jsQR } = await import("jsqr");
-          const image = context.getImageData(0, 0, canvas.width, canvas.height);
-          const found = jsQR(image.data, image.width, image.height, {
-            inversionAttempts: "dontInvert",
-          });
-          if (found?.data) handleDetection(found.data);
+        } catch {
+          /* transient decode errors are normal */
+        } finally {
+          decodingRef.current = false;
         }
         rafRef.current = requestAnimationFrame(() => void tick());
       };
@@ -109,6 +125,15 @@ export function QRScanner({
     }
   }, [handleDetection]);
 
+  // A staffed event desk should be ready as soon as it opens. The guard keeps
+  // a declined camera permission from repeatedly prompting the staff member.
+  useEffect(() => {
+    if (autoStart && !autoStartedRef.current) {
+      autoStartedRef.current = true;
+      void start();
+    }
+  }, [autoStart, start]);
+
   return (
     <div className="space-y-3">
       <div className="relative aspect-[4/3] w-full max-w-md overflow-hidden rounded-xl border border-hairline bg-black">
@@ -122,6 +147,11 @@ export function QRScanner({
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute inset-x-8 top-1/2 h-0.5 animate-[scanner-sweep_2s_ease-in-out_infinite] bg-emerald-300 shadow-[0_0_16px_rgb(110,231,183)]" />
             <div className="absolute inset-6 rounded-lg border-2 border-white/25" />
+          </div>
+        )}
+        {state === "scanning" && paused && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 p-6 text-center text-white">
+            <p className="font-mono text-xs uppercase tracking-[0.16em]">Scan paused · review result</p>
           </div>
         )}
         {state !== "scanning" && (

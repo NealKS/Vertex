@@ -1,6 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import type {
+  getJudgingData,
+  loadTeamByToken,
+  loadTeamByMemberToken,
+  checkInHackathonTeam as checkInHackathonTeamServer,
+} from "@/lib/hackathon.server";
 import {
   hackathonRegisterInput,
   hackathonJoinInput,
@@ -41,7 +47,7 @@ const LOCAL_HACKATHON_PREVIEW = {
   showcase: [],
   statements: [],
   roster: [],
-} as const;
+};
 
 function shouldUseLocalHackathonPreview() {
   const url = process.env["SUPABASE_URL"] ?? "";
@@ -147,7 +153,7 @@ export const getHackathon = createServerFn({ method: "GET" }).handler(async () =
 });
 
 export const registerHackathonTeam = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => hackathonRegisterInput.parse(input))
+  .validator((input: unknown) => hackathonRegisterInput.parse(input))
   .handler(async ({ data }) => {
     await limit("sih-register", 5, 60 * 60 * 1000);
     const { createTeam } = await import("@/lib/hackathon.server");
@@ -155,7 +161,7 @@ export const registerHackathonTeam = createServerFn({ method: "POST" })
   });
 
 export const joinHackathonTeam = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => hackathonJoinInput.parse(input))
+  .validator((input: unknown) => hackathonJoinInput.parse(input))
   .handler(async ({ data }) => {
     await limit("sih-join", 10, 60 * 60 * 1000);
     const { joinTeam } = await import("@/lib/hackathon.server");
@@ -163,25 +169,23 @@ export const joinHackathonTeam = createServerFn({ method: "POST" })
   });
 
 export const previewJoinCode = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z.object({ code: z.string().trim().min(4).max(20) }).parse(input),
-  )
+  .validator((input: unknown) => z.object({ code: z.string().trim().min(4).max(20) }).parse(input))
   .handler(async ({ data }) => {
     const { getJoinPreview } = await import("@/lib/hackathon.server");
     return getJoinPreview(data.code);
   });
 
 export const getMyTeamMembership = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ token: z.string().trim().min(10).max(120) }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<ReturnType<typeof loadTeamByMemberToken>> => {
     const { loadTeamByMemberToken } = await import("@/lib/hackathon.server");
     return loadTeamByMemberToken(data.token);
   });
 
 export const updateMyMembership = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         token: z.string().trim().min(10).max(120),
@@ -203,7 +207,7 @@ export const updateMyMembership = createServerFn({ method: "POST" })
   });
 
 export const leaveMyTeam = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ token: z.string().trim().min(10).max(120) }).parse(input),
   )
   .handler(async ({ data }) => {
@@ -213,7 +217,7 @@ export const leaveMyTeam = createServerFn({ method: "POST" })
   });
 
 export const rotateHackathonJoinCode = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ token: z.string().trim().min(10).max(120) }).parse(input),
   )
   .handler(async ({ data }) => {
@@ -223,16 +227,16 @@ export const rotateHackathonJoinCode = createServerFn({ method: "POST" })
   });
 
 export const getHackathonTeam = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ token: z.string().trim().min(10).max(120) }).parse(input),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<ReturnType<typeof loadTeamByToken>> => {
     const { loadTeamByToken } = await import("@/lib/hackathon.server");
     return loadTeamByToken(data.token);
   });
 
 export const updateHackathonTeam = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => hackathonTeamUpdateInput.parse(input))
+  .validator((input: unknown) => hackathonTeamUpdateInput.parse(input))
   .handler(async ({ data }) => {
     await limit("sih-update", 30, 60 * 60 * 1000);
     const { updateTeam } = await import("@/lib/hackathon.server");
@@ -240,7 +244,7 @@ export const updateHackathonTeam = createServerFn({ method: "POST" })
   });
 
 export const saveHackathonSubmission = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => hackathonSubmissionInput.parse(input))
+  .validator((input: unknown) => hackathonSubmissionInput.parse(input))
   .handler(async ({ data }) => {
     await limit("sih-submit", 30, 60 * 60 * 1000);
     const { saveSubmission } = await import("@/lib/hackathon.server");
@@ -248,7 +252,7 @@ export const saveHackathonSubmission = createServerFn({ method: "POST" })
   });
 
 export const uploadHackathonDeck = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => hackathonDeckUploadInput.parse(input))
+  .validator((input: unknown) => hackathonDeckUploadInput.parse(input))
   .handler(async ({ data }) => {
     await limit("sih-deck", 12, 60 * 60 * 1000);
     const { storeSubmissionDeck } = await import("@/lib/hackathon.server");
@@ -257,10 +261,8 @@ export const uploadHackathonDeck = createServerFn({ method: "POST" })
 
 export const checkInHackathonTeam = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
-    z.object({ code: z.string().trim().min(8).max(240) }).parse(input),
-  )
-  .handler(async ({ data, context }) => {
+  .validator((input: unknown) => z.object({ code: z.string().trim().min(8).max(240) }).parse(input))
+  .handler(async ({ data, context }): Promise<ReturnType<typeof checkInHackathonTeamServer>> => {
     await limit("sih-checkin", 240, 60 * 1000);
     const { assertStaff } = await import("@/lib/roles.server");
     await assertStaff(context.supabase, context.userId);
@@ -279,7 +281,7 @@ export const hackathonAdmin = createServerFn({ method: "GET" })
 
 export const reissueHackathonTeamKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ teamId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ teamId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { assertStaff } = await import("@/lib/roles.server");
     await assertStaff(context.supabase, context.userId);
@@ -289,7 +291,7 @@ export const reissueHackathonTeamKey = createServerFn({ method: "POST" })
 
 export const reopenHackathonSubmission = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ teamId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ teamId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -299,7 +301,7 @@ export const reopenHackathonSubmission = createServerFn({ method: "POST" })
 
 export const toggleHackathonShowcase = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z.object({ teamId: z.string().uuid(), published: z.boolean() }).parse(input),
   )
   .handler(async ({ data, context }) => {
@@ -311,7 +313,7 @@ export const toggleHackathonShowcase = createServerFn({ method: "POST" })
 
 export const assignHackathonMentor = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         teamId: z.string().uuid(),
@@ -329,7 +331,7 @@ export const assignHackathonMentor = createServerFn({ method: "POST" })
 
 export const getJudging = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .handler(async ({ context }): Promise<ReturnType<typeof getJudgingData>> => {
     await (await import("@/lib/roles.server")).assertJudge(context.supabase, context.userId);
     const { getJudgingData } = await import("@/lib/hackathon.server");
     return getJudgingData();
@@ -337,7 +339,7 @@ export const getJudging = createServerFn({ method: "GET" })
 
 export const saveJudgingScore = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         teamId: z.string().uuid(),
@@ -355,7 +357,7 @@ export const saveJudgingScore = createServerFn({ method: "POST" })
 
 export const saveHackathonWorkspace = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => hackathonWorkspaceInput.parse(input))
+  .validator((input: unknown) => hackathonWorkspaceInput.parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -378,7 +380,7 @@ export const saveHackathonWorkspace = createServerFn({ method: "POST" })
 
 export const saveMilestone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => milestoneInput.parse(input))
+  .validator((input: unknown) => milestoneInput.parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -401,7 +403,7 @@ export const saveMilestone = createServerFn({ method: "POST" })
 
 export const deleteMilestone = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -412,7 +414,7 @@ export const deleteMilestone = createServerFn({ method: "POST" })
 
 export const saveEventAnnouncement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => eventAnnouncementInput.parse(input))
+  .validator((input: unknown) => eventAnnouncementInput.parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -430,7 +432,7 @@ export const saveEventAnnouncement = createServerFn({ method: "POST" })
 
 export const saveHackathonProblemStatement = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => hackathonProblemStatementInput.parse(input))
+  .validator((input: unknown) => hackathonProblemStatementInput.parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -457,7 +459,7 @@ export const saveHackathonProblemStatement = createServerFn({ method: "POST" })
 
 export const setHackathonTeamStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         id: z.string().uuid(),

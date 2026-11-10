@@ -1,12 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 
+import { isAdminEmail } from "./admin-access.server";
+
 export type Db = SupabaseClient<Database>;
 
 export type Viewer = {
   userId: string;
   roles: string[];
   isAdmin: boolean;
+  isAllowlisted: boolean;
   isHead: boolean;
   isJudge: boolean;
   isMentor: boolean;
@@ -25,22 +28,30 @@ export type Viewer = {
 };
 
 export async function loadViewer(supabase: Db, userId: string): Promise<Viewer> {
-  const [rolesRes, memberRes] = await Promise.all([
+  const [rolesRes, memberRes, authRes] = await Promise.all([
     supabase.from("user_roles").select("role").eq("user_id", userId),
     supabase
       .from("members")
       .select("id, slug, name, role, team_id, photo_url, bio, skills, links, is_head")
       .eq("user_id", userId)
       .maybeSingle(),
+    supabase.auth.getUser(),
   ]);
 
+  const user = authRes.data.user;
+  const isAllowlisted =
+    !authRes.error &&
+    user?.id === userId &&
+    Boolean(user.email_confirmed_at) &&
+    isAdminEmail(user.email);
   const roles = (rolesRes.data ?? []).map((r) => String(r.role));
   const m = memberRes.data;
 
   return {
     userId,
     roles,
-    isAdmin: roles.includes("admin"),
+    isAdmin: roles.includes("admin") || isAllowlisted,
+    isAllowlisted,
     isHead: roles.includes("head") || Boolean(m?.is_head),
     isJudge: roles.includes("judge"),
     isMentor: roles.includes("mentor"),

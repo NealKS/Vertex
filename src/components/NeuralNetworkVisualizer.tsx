@@ -1,483 +1,780 @@
-import { RefreshCw } from "lucide-react";
-import { type CSSProperties, useMemo, useState } from "react";
+import { ArrowRight, Eraser, Play, StepForward } from "lucide-react";
+import { useReducedMotion } from "motion/react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  prepareDigit,
+  runDigitNetwork,
+  validateDigitModel,
+  type DigitModel,
+  type DigitPass,
+} from "@/lib/digit-network";
+import "./digit-lab.css";
 
-const IMAGE_SIZE = 28;
-const HIDDEN_SIZE = 16;
-const INPUT_SIZE = IMAGE_SIZE * IMAGE_SIZE;
-
-const GLYPHS = {
-  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
-  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
-  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
-  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
-  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
-  "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
-  "6": ["01110", "10000", "10000", "11110", "10001", "10001", "01110"],
-  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
-  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
-  "9": ["01110", "10001", "10001", "01111", "00001", "00001", "01110"],
-} as const;
-
-type Digit = keyof typeof GLYPHS;
-type Point = { x: number; y: number };
-type ForwardPass = {
-  input: number[];
-  hiddenOne: number[];
-  hiddenTwo: number[];
-  output: number[];
-};
-
-const DIGITS = Object.keys(GLYPHS) as Digit[];
-const FEATURE_MASKS = Array.from({ length: HIDDEN_SIZE }, (_, featureIndex) =>
-  Array.from({ length: INPUT_SIZE }, (_, pixelIndex) => {
-    const x = pixelIndex % IMAGE_SIZE;
-    const y = Math.floor(pixelIndex / IMAGE_SIZE);
-    return featureWeight(featureIndex, x, y);
-  }),
-);
-const HIDDEN_WEIGHTS = Array.from({ length: HIDDEN_SIZE }, (_, target) =>
-  Array.from({ length: HIDDEN_SIZE }, (_, source) =>
-    target === source ? 4 : (target + source) % 5 === 0 ? 0.65 : -0.15,
-  ),
-);
-const DIGIT_PIXELS = Object.fromEntries(
-  DIGITS.map((digit) => [digit, rasterizeGlyph(GLYPHS[digit])]),
-) as Record<Digit, number[]>;
-const PROTOTYPES = Object.fromEntries(
-  DIGITS.map((digit) => [
-    digit,
-    hiddenLayer(hiddenLayer(DIGIT_PIXELS[digit], FEATURE_MASKS), HIDDEN_WEIGHTS),
-  ]),
-) as Record<Digit, number[]>;
-const OUTPUT_WEIGHTS = DIGITS.map((digit) => PROTOTYPES[digit].map((value) => value * 36));
-const OUTPUT_BIASES = DIGITS.map(
-  (digit) => -18 * PROTOTYPES[digit].reduce((sum, value) => sum + value * value, 0),
-);
+const SIZE = 280;
+const EMPTY = Array<number>(784).fill(0);
+const STEPS = [
+  "Your 784 pixels",
+  "Hidden layer 1 · ReLU",
+  "Hidden layer 2 · ReLU",
+  "10 digit scores",
+];
+const MODEL_URL = "/models/digit-mlp-v1.json";
 
 export function NeuralNetworkVisualizer() {
-  const [digit, setDigit] = useState<Digit>("3");
-  const [replay, setReplay] = useState(0);
-  const pass = useMemo(() => forwardPass(DIGIT_PIXELS[digit]), [digit]);
-  const prediction = String(pass.output.indexOf(Math.max(...pass.output))) as Digit;
-  const referenceStyle = {
-    "--nn-theme": "oklch(55% 0.15 240)",
-    "--nn-secondary": "oklch(55% 0.15 60)",
-    fontFamily: '"Source Serif 4 Variable", var(--font-display)',
-  } as CSSProperties;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef<number | null>(null);
+  const lastPoint = useRef({ x: 0, y: 0 });
+  const [model, setModel] = useState<DigitModel | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [input, setInput] = useState<number[]>(EMPTY);
+  const [hasPrediction, setHasPrediction] = useState(false);
+  const [mode, setMode] = useState<"trained" | "untrained">("trained");
+  const [stage, setStage] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [message, setMessage] = useState("Draw one digit, or load a handwriting example below.");
+  const [selected, setSelected] = useState({ layer: 0, neuron: 0 });
+  const reducedMotion = useReducedMotion();
+  const hasInk = input.some((value) => value > 0);
+  const layers = model ? (mode === "trained" ? model.layers : model.untrainedLayers) : null;
+  const pass = useMemo(
+    () => (hasPrediction && layers ? runDigitNetwork(input, layers) : null),
+    [hasPrediction, input, layers],
+  );
+  const comparison = useMemo(
+    () =>
+      hasPrediction && model
+        ? {
+            trained: runDigitNetwork(input, model.layers),
+            untrained: runDigitNetwork(input, model.untrainedLayers),
+          }
+        : null,
+    [hasPrediction, input, model],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(MODEL_URL, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Could not load the model.");
+        return response.json();
+      })
+      .then((value) => {
+        setModel(validateDigitModel(value));
+        setLoadError(false);
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") setLoadError(true);
+      });
+    return () => controller.abort();
+  }, [retry]);
+
+  useEffect(() => {
+    const context = canvasRef.current?.getContext("2d");
+    if (context) {
+      context.fillStyle = "#111812";
+      context.fillRect(0, 0, SIZE, SIZE);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (reducedMotion) {
+      setStage(3);
+      setPlaying(false);
+      return;
+    }
+    const timer = window.setInterval(() => setStage((value) => Math.min(3, value + 1)), 650);
+    return () => window.clearInterval(timer);
+  }, [playing, reducedMotion]);
+  useEffect(() => {
+    if (stage === 3) setPlaying(false);
+  }, [stage]);
+
+  function clear() {
+    const context = canvasRef.current?.getContext("2d");
+    if (context) {
+      context.fillStyle = "#111812";
+      context.fillRect(0, 0, SIZE, SIZE);
+    }
+    setInput(EMPTY);
+    setHasPrediction(false);
+    setPlaying(false);
+    setStage(0);
+    setMessage("Canvas cleared. Draw another digit.");
+  }
+
+  function point(event: PointerEvent<HTMLCanvasElement>) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: ((event.clientX - bounds.left) * SIZE) / bounds.width,
+      y: ((event.clientY - bounds.top) * SIZE) / bounds.height,
+    };
+  }
+  function drawTo(next: { x: number; y: number }, start = false) {
+    const context = canvasRef.current?.getContext("2d");
+    if (!context) return;
+    context.strokeStyle = "#ffffff";
+    context.fillStyle = "#ffffff";
+    context.lineWidth = 18;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    if (start) {
+      context.beginPath();
+      context.arc(next.x, next.y, 9, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      context.beginPath();
+      context.moveTo(lastPoint.current.x, lastPoint.current.y);
+      context.lineTo(next.x, next.y);
+      context.stroke();
+    }
+    lastPoint.current = next;
+  }
+  function startDrawing(event: PointerEvent<HTMLCanvasElement>) {
+    if (drawing.current !== null || (event.pointerType === "mouse" && event.button !== 0)) return;
+    event.preventDefault();
+    drawing.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setPlaying(false);
+    setHasPrediction(false);
+    setStage(0);
+    drawTo(point(event), true);
+  }
+  function finishDrawing(event: PointerEvent<HTMLCanvasElement>) {
+    if (drawing.current !== event.pointerId) return;
+    drawing.current = null;
+    const context = event.currentTarget.getContext("2d");
+    if (!context) return;
+    const rgba = context.getImageData(0, 0, SIZE, SIZE).data;
+    // The paper is a very dark green; discard its luminance before finding ink.
+    const raw = new Float32Array(SIZE * SIZE);
+    for (let i = 0; i < raw.length; i++) raw[i] = Math.max(0, (rgba[i * 4] - 17) / 238);
+    const prepared = prepareDigit(raw, SIZE, SIZE);
+    setInput(prepared ?? EMPTY);
+    setMessage(
+      prepared
+        ? "Drawing ready. Press Predict digit to run the network."
+        : "Add a larger digit before predicting.",
+    );
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  function loadExample(digit: number) {
+    if (!model) return;
+    const pixels = model.examples[digit].pixels;
+    const context = canvasRef.current?.getContext("2d");
+    if (context) {
+      context.fillStyle = "#111812";
+      context.fillRect(0, 0, SIZE, SIZE);
+      pixels.forEach((pixel, i) => {
+        if (pixel) {
+          context.fillStyle = `rgb(${pixel} ${pixel} ${pixel})`;
+          context.fillRect((i % 28) * 10, Math.floor(i / 28) * 10, 10, 10);
+        }
+      });
+    }
+    setInput(pixels.map((value) => value / 255));
+    setHasPrediction(false);
+    setStage(0);
+    setPlaying(false);
+    setMessage(`Loaded a held-out MNIST example of ${digit}. Press Predict digit.`);
+  }
+  function predict() {
+    if (!model || !hasInk) return;
+    setHasPrediction(true);
+    setStage(reducedMotion ? 3 : 0);
+    setPlaying(!reducedMotion);
+    setMessage(
+      "Prediction computed on your device. Follow the actual activations through each layer.",
+    );
+  }
 
   return (
-    <section
-      className="relative isolate mx-auto flex max-w-6xl flex-col gap-4 px-6 py-8 pb-16 md:pb-24"
-      style={referenceStyle}
-      aria-labelledby="visual-intuition-title"
-    >
-      <div className="flex flex-wrap items-end justify-between gap-5">
+    <section className="digit-lab mx-auto max-w-6xl px-6 pb-16" aria-labelledby="digit-lab-title">
+      <div className="digit-lab-heading">
         <div>
-          <div className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.25em] text-[var(--nn-theme)]">
-            <span className="inline-block h-px w-8 bg-[var(--nn-theme)]" />A visual intuition
-          </div>
-          <h2
-            id="visual-intuition-title"
-            className="mt-4 max-w-3xl text-4xl font-normal leading-[1.05] tracking-tight text-foreground md:text-6xl"
-          >
-            Watch an idea become a prediction.
+          <p className="digit-eyebrow">Vertex / Neural network lab</p>
+          <h2 id="digit-lab-title">
+            Your handwriting.
+            <br />
+            <em>The network’s best guess.</em>
           </h2>
         </div>
-        <div className="font-mono text-sm text-muted-foreground">784 inputs · 10 outputs</div>
+        <p>
+          Draw a digit. Follow the numbers.
+          <br />
+          Find out where the model gets it wrong.
+        </p>
       </div>
-
-      <div className="grid gap-8 border-y border-hairline py-8 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
-        <div className="flex flex-col">
-          <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-            Input image
-          </div>
-          <p className="mt-2 max-w-sm text-2xl leading-tight text-foreground">
-            A tiny sketch becomes numbers.
-          </p>
-
-          <div
-            className="mx-auto mt-8 grid aspect-square w-full max-w-[290px] grid-cols-[repeat(28,minmax(0,1fr))] gap-px border border-[color-mix(in_oklab,var(--nn-theme)_30%,transparent)] bg-[color-mix(in_oklab,var(--nn-theme)_5%,transparent)] p-3"
-            role="img"
-            aria-label={"28 by 28 pixel input image of the digit " + digit}
+      <div className="digit-lab-toolbar">
+        <span className="digit-model-status">
+          <span className={model ? "digit-status-dot" : ""} />
+          {model
+            ? "Model ready · runs on your device"
+            : loadError
+              ? "Model unavailable"
+              : "Loading handwriting model…"}
+        </span>
+        <div className="digit-segment" role="group" aria-label="Model training state">
+          {(["trained", "untrained"] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              disabled={!model}
+              aria-pressed={mode === option}
+              onClick={() => {
+                setMode(option);
+                setPlaying(false);
+                setStage(hasPrediction ? 3 : 0);
+              }}
+            >
+              {option === "trained" ? "Trained" : "Before training"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loadError && (
+        <div className="digit-error" role="alert">
+          The model couldn’t be downloaded. Check your connection and{" "}
+          <button
+            type="button"
+            onClick={() => {
+              setLoadError(false);
+              setRetry((value) => value + 1);
+            }}
           >
-            {pass.input.map((value, index) => (
-              <span
-                key={index}
-                className="aspect-square"
-                style={{
-                  backgroundColor: "var(--nn-theme)",
-                  opacity: 0.04 + value * 0.96,
-                }}
-              />
-            ))}
+            try again
+          </button>
+          . Your registration still works.
+        </div>
+      )}
+      <div className="digit-lab-grid">
+        <div className="digit-drawing-panel">
+          <div className="digit-panel-label">
+            <span>01 / Draw</span>
+            <span>One digit · 0–9</span>
           </div>
-
-          <div className="mt-7 flex flex-wrap items-center gap-2" aria-label="Choose a digit">
-            {DIGITS.map((option) => (
+          <div className="digit-canvas-wrap">
+            <canvas
+              ref={canvasRef}
+              width={SIZE}
+              height={SIZE}
+              aria-label="Draw a handwritten digit here using a mouse, pen or finger. Keyboard users can choose an example below."
+              aria-describedby="digit-drawing-help"
+              onPointerDown={startDrawing}
+              onPointerMove={(event) => {
+                if (drawing.current === event.pointerId) drawTo(point(event));
+              }}
+              onPointerUp={finishDrawing}
+              onPointerCancel={finishDrawing}
+              onLostPointerCapture={finishDrawing}
+            />
+            {!hasInk && (
+              <span className="digit-canvas-hint" aria-hidden="true">
+                Draw here
+              </span>
+            )}
+            <span className="digit-canvas-corner" aria-hidden="true">
+              28 × 28 input
+            </span>
+          </div>
+          <div className="digit-drawing-actions">
+            <button
+              type="button"
+              className="digit-primary"
+              onClick={predict}
+              disabled={!model || !hasInk}
+            >
+              Predict digit <ArrowRight size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="digit-icon-button"
+              onClick={clear}
+              aria-label="Clear drawing"
+            >
+              <Eraser size={17} aria-hidden="true" />
+            </button>
+          </div>
+          <p id="digit-drawing-help" className="digit-help">
+            Use most of the square. Draw a single digit with a finger or mouse.
+          </p>
+          <p className="digit-example-label">Or try real handwriting</p>
+          <div className="digit-examples" role="group" aria-label="MNIST handwriting examples">
+            {Array.from({ length: 10 }, (_, i) => (
               <button
-                key={option}
                 type="button"
-                aria-pressed={digit === option}
-                onClick={() => setDigit(option)}
-                className="flex h-10 w-10 items-center justify-center border border-hairline font-mono text-sm transition-colors hover:border-[var(--nn-theme)] aria-pressed:border-[var(--nn-theme)] aria-pressed:bg-[var(--nn-theme)] aria-pressed:text-white"
+                key={i}
+                disabled={!model}
+                aria-label={`Load example digit ${i}`}
+                onClick={() => loadExample(i)}
               >
-                {option}
+                {i}
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setReplay((value) => value + 1)}
-            className="mt-5 inline-flex w-fit items-center gap-2 font-mono text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:text-[var(--nn-theme)]"
-          >
-            <RefreshCw size={14} aria-hidden="true" /> Replay signal
-          </button>
-        </div>
-
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <div className="digit-preprocess">
+            <PixelImage pixels={input} label="Preprocessed 28 by 28 pixel input" />
             <div>
-              <div className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-                Forward pass
-              </div>
-              <p className="mt-2 text-2xl leading-tight text-foreground">
-                Activations move left to right.
+              <span className="digit-eyebrow">What it sees</span>
+              <p>
+                Cropped, resized and centred.
+                <br />
+                784 brightness values, from 0 to 1.
               </p>
             </div>
-            <div className="font-mono text-xs uppercase tracking-wider text-[var(--nn-secondary)]">
-              live
-            </div>
-          </div>
-
-          <div className="mt-8 overflow-hidden border-y border-hairline py-4">
-            <NetworkDiagram digit={digit} pass={pass} prediction={prediction} replay={replay} />
-          </div>
-
-          <div className="mt-7">
-            <div className="flex items-center justify-between font-mono text-xs uppercase tracking-wider text-muted-foreground">
-              <span>Output layer · 10 classes</span>
-              <span>confidence</span>
-            </div>
-            <div className="mt-4 grid gap-2.5" aria-live="polite">
-              {pass.output.map((score, index) => {
-                const label = String(index) as Digit;
-                const isPrediction = label === prediction;
-                return (
-                  <div
-                    key={label}
-                    className="grid grid-cols-[1.5rem_1fr_3.5rem] items-center gap-3"
-                  >
-                    <span className={isPrediction ? "text-lg text-[var(--nn-theme)]" : "text-lg"}>
-                      {label}
-                    </span>
-                    <div className="h-2 bg-[color-mix(in_oklab,var(--foreground)_10%,transparent)]">
-                      <div
-                        className="h-full transition-[width] duration-700"
-                        style={{
-                          width: score * 100 + "%",
-                          backgroundColor: isPrediction
-                            ? "var(--nn-theme)"
-                            : "color-mix(in oklab, var(--nn-theme) 28%, transparent)",
-                        }}
-                      />
-                    </div>
-                    <span className="text-right font-mono text-xs tabular-nums text-muted-foreground">
-                      {Math.round(score * 100)}%
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </div>
+        <div className="digit-network-panel">
+          <div className="digit-panel-label">
+            <span>02 / Follow the forward pass</span>
+            <span>784 → 16 → 16 → 10</span>
+          </div>
+          <div className="digit-step-controls">
+            <button
+              type="button"
+              className="digit-text-button"
+              disabled={!pass}
+              onClick={() => {
+                setStage(reducedMotion ? 3 : 0);
+                setPlaying(!reducedMotion);
+              }}
+            >
+              <Play size={14} aria-hidden="true" /> Replay
+            </button>
+            <button
+              type="button"
+              className="digit-text-button"
+              disabled={!pass || stage === 3}
+              onClick={() => {
+                setPlaying(false);
+                setStage((value) => Math.min(3, value + 1));
+              }}
+            >
+              <StepForward size={15} aria-hidden="true" /> Next layer
+            </button>
+            <button
+              type="button"
+              className="digit-text-button"
+              disabled={!pass}
+              onClick={() => {
+                setPlaying(false);
+                setStage(3);
+              }}
+            >
+              Show all
+            </button>
+          </div>
+          <NetworkDiagram
+            pass={pass}
+            layers={layers}
+            input={input}
+            stage={stage}
+            selected={selected}
+            onSelect={(layer, neuron) => setSelected({ layer, neuron })}
+          />
+          <div className="digit-stage-label" aria-live="polite">
+            {pass ? `${stage + 1}/4 · ${STEPS[stage]}` : "Draw or choose an example to begin."}
+          </div>
+          <div className="digit-result" aria-live="polite" aria-atomic="true">
+            <span className="digit-result-number">
+              {pass && stage === 3 ? pass.prediction : "—"}
+            </span>
+            <div>
+              <p className="digit-eyebrow">
+                {mode === "trained" ? "Trained model prediction" : "Untrained model prediction"}
+              </p>
+              <p>
+                {pass && stage === 3
+                  ? `${(Math.max(...pass.probabilities) * 100).toFixed(1)}% model score${Math.max(...pass.probabilities) < 0.65 ? " · ambiguous input" : ""}`
+                  : "The result appears after the output layer."}
+              </p>
+            </div>
+          </div>
+          <div className="digit-output-bars" aria-label="Scores for digits zero through nine">
+            {Array.from({ length: 10 }, (_, digit) => {
+              const score = pass && stage === 3 ? pass.probabilities[digit] : 0;
+              return (
+                <div
+                  key={digit}
+                  className={
+                    pass?.prediction === digit && stage === 3
+                      ? "digit-output is-winner"
+                      : "digit-output"
+                  }
+                >
+                  <span>{digit}</span>
+                  <div className="digit-bar">
+                    <span style={{ height: `${score * 100}%` }} />
+                  </div>
+                  <span className="digit-score">
+                    {pass && stage === 3 ? `${Math.round(score * 100)}%` : "—"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="digit-help">
+            These scores compare digits 0–9; they do not prove a drawing is a digit. Scribbles can
+            still receive a high score.
+          </p>
+        </div>
       </div>
-
-      <div className="grid grid-cols-2 gap-x-8 gap-y-5 border-b border-hairline pb-6 sm:grid-cols-4">
-        <Metric label="Input" value="784 pixels" />
-        <Metric label="Hidden layers" value="16 + 16" />
-        <Metric label="Parameters" value="13,002" />
-        <Metric label="Prediction" value={prediction} />
+      <p className="digit-announcement" role="status">
+        {message}
+      </p>
+      {model && (
+        <div className="digit-explore-grid">
+          <NeuronInspector
+            pass={pass}
+            layers={layers!}
+            selected={selected}
+            onSelect={setSelected}
+          />
+          <div className="digit-comparison">
+            <p className="digit-eyebrow">Same drawing. Different weights.</p>
+            <h3>What does training change?</h3>
+            <p>
+              The architecture stays the same. Training adjusts 13,002 weights and biases using
+              labelled handwriting.
+            </p>
+            <div className="digit-comparison-results">
+              {(["untrained", "trained"] as const).map((state) => (
+                <div key={state}>
+                  <span>{state === "trained" ? "After training" : "Before training"}</span>
+                  <strong>{comparison ? comparison[state].prediction : "—"}</strong>
+                  <span>
+                    {comparison
+                      ? `${(Math.max(...comparison[state].probabilities) * 100).toFixed(1)}% score`
+                      : "Predict to compare"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="digit-help">
+              Before training uses the model’s seeded initial weights. This comparison does not
+              retrain or save your drawing.
+            </p>
+          </div>
+        </div>
+      )}
+      <div className="digit-lab-footer">
+        <span>784 inputs · 16 + 16 hidden neurons · 10 outputs</span>
+        <span>
+          {model
+            ? `${(model.metadata.testAccuracy * 100).toFixed(1)}% on ${model.metadata.testExamples.toLocaleString("en-IN")} held-out MNIST images`
+            : "Small model. Real computation."}
+        </span>
       </div>
-      <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-        Self-contained teaching model · deterministic weights · real 784 → 16 → 16 → 10 forward pass
+      <p className="digit-credit">
+        Built for Vertex. Inspired by{" "}
+        <a
+          href="https://www.3blue1brown.com/lessons/neural-networks"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Grant Sanderson’s neural networks lesson ↗
+        </a>
+        . Our model is trained on MNIST; browser handwriting can be harder than the test set.
+        Drawings stay on your device.
       </p>
     </section>
   );
 }
 
-function NetworkDiagram({
-  digit,
-  pass,
-  prediction,
-  replay,
+function PixelImage({
+  pixels,
+  label,
+  signed = false,
 }: {
-  digit: Digit;
-  pass: ForwardPass;
-  prediction: Digit;
-  replay: number;
+  pixels: number[];
+  label: string;
+  signed?: boolean;
 }) {
-  const inputRect = { x: 8, y: 18, width: 48, height: 145 };
-  const hiddenOne = layerPoints(126, HIDDEN_SIZE, 16, 145);
-  const hiddenTwo = layerPoints(232, HIDDEN_SIZE, 16, 145);
-  const output = layerPoints(340, 10, 10, 150);
-  const edges = [
-    ...hiddenOne.flatMap((source, sourceIndex) =>
-      hiddenTwo.map((target, targetIndex) => ({
-        source,
-        target,
-        strength: pass.hiddenOne[sourceIndex]! * pass.hiddenTwo[targetIndex]!,
-        key: "one-two-" + sourceIndex + "-" + targetIndex,
-      })),
-    ),
-    ...hiddenTwo.flatMap((source, sourceIndex) =>
-      output.map((target, targetIndex) => ({
-        source,
-        target,
-        strength: pass.hiddenTwo[sourceIndex]! * pass.output[targetIndex]!,
-        key: "two-output-" + sourceIndex + "-" + targetIndex,
-      })),
-    ),
-  ];
-  const signalEdges = [...edges].sort((a, b) => b.strength - a.strength).slice(0, 12);
+  const maximum = signed ? Math.max(0.001, ...pixels.map(Math.abs)) : 1;
+  return (
+    <div className="digit-pixels" role="img" aria-label={label}>
+      {pixels.map((v, i) => (
+        <span
+          key={i}
+          style={{
+            backgroundColor: signed && v < 0 ? "var(--foreground)" : "var(--accent)",
+            opacity: 0.04 + 0.96 * Math.min(1, Math.abs(v) / maximum),
+          }}
+        />
+      ))}
+    </div>
+  );
+}
 
+function NetworkDiagram({
+  pass,
+  layers,
+  input,
+  stage,
+  selected,
+  onSelect,
+}: {
+  pass: DigitPass | null;
+  layers: DigitModel["layers"] | null;
+  input: number[];
+  stage: number;
+  selected: { layer: number; neuron: number };
+  onSelect: (layer: number, neuron: number) => void;
+}) {
+  const points = [
+    Array.from({ length: 16 }, (_, i) => ({ x: 154, y: 32 + i * 16 })),
+    Array.from({ length: 16 }, (_, i) => ({ x: 310, y: 32 + i * 16 })),
+    Array.from({ length: 10 }, (_, i) => ({ x: 466, y: 80 + i * 16 })),
+  ];
+  const values = pass
+    ? pass.activations.slice(1)
+    : [Array(16).fill(0), Array(16).fill(0), Array(10).fill(0)];
+  const brightness = values.map((layer) => layer.map((v) => v / Math.max(1, ...layer)));
+  const contributions = [0, 1].map((layer) =>
+    points[layer].flatMap((_, i) =>
+      points[layer + 1].map((_, j) => (layers?.[layer + 1].weights[j][i] ?? 0) * values[layer][i]),
+    ),
+  );
+  const maxContribution = contributions.map((group) => Math.max(0.001, ...group.map(Math.abs)));
   return (
     <svg
-      key={digit + "-" + replay}
-      viewBox="0 0 372 190"
-      className="h-auto w-full"
-      role="img"
-      aria-label={
-        "Neural network forward pass for digit " + digit + ", predicting digit " + prediction
-      }
+      className="digit-network-svg"
+      viewBox="0 0 520 318"
+      role="group"
+      aria-label="Interactive neural network. Select a hidden neuron to inspect its calculation."
     >
-      <title>784 pixel input through two hidden layers to ten output classes</title>
-      <defs>
-        <linearGradient id="nn-signal-line" x1="0" x2="1">
-          <stop offset="0" stopColor="var(--nn-theme)" stopOpacity="0.05" />
-          <stop offset="0.5" stopColor="var(--nn-theme)" stopOpacity="0.7" />
-          <stop offset="1" stopColor="var(--nn-theme)" stopOpacity="0.05" />
-        </linearGradient>
-      </defs>
-
       <rect
-        x={inputRect.x}
-        y={inputRect.y}
-        width={inputRect.width}
-        height={inputRect.height}
-        rx="2"
-        fill="color-mix(in oklab, var(--nn-theme) 5%, transparent)"
-        stroke="var(--nn-theme)"
-        strokeOpacity="0.25"
+        x="10"
+        y="100"
+        width="64"
+        height="64"
+        fill="var(--background)"
+        stroke="var(--hairline)"
       />
-      {pass.input.map((value, index) => {
-        const x = index % IMAGE_SIZE;
-        const y = Math.floor(index / IMAGE_SIZE);
-        const width = inputRect.width / IMAGE_SIZE;
-        const height = inputRect.height / IMAGE_SIZE;
-        return (
-          <rect
-            key={index}
-            x={inputRect.x + x * width}
-            y={inputRect.y + y * height}
-            width={width + 0.15}
-            height={height + 0.15}
-            fill="var(--nn-theme)"
-            opacity={0.04 + value * 0.9}
-          />
-        );
-      })}
-
-      {hiddenOne.map((target, index) => (
+      {input.map(
+        (v, i) =>
+          v > 0.02 && (
+            <rect
+              key={i}
+              x={10 + ((i % 28) * 64) / 28}
+              y={100 + (Math.floor(i / 28) * 64) / 28}
+              width={2.4}
+              height={2.4}
+              fill="var(--accent)"
+              opacity={v}
+            />
+          ),
+      )}
+      {points[0].map((target, i) => (
         <line
-          key={"input-edge-" + index}
-          x1={inputRect.x + inputRect.width}
-          y1={inputRect.y + inputRect.height / 2}
+          key={`in-${i}`}
+          x1="74"
+          y1="132"
           x2={target.x}
           y2={target.y}
-          stroke="var(--foreground)"
-          strokeOpacity={0.12 + pass.hiddenOne[index]! * 0.2}
-          strokeWidth="0.55"
+          stroke="var(--accent)"
+          strokeOpacity={pass && stage >= 1 ? 0.15 + brightness[0][i] * 0.4 : 0.08}
         />
       ))}
-      {edges.map((edge) => (
-        <line
-          key={edge.key}
-          x1={edge.source.x}
-          y1={edge.source.y}
-          x2={edge.target.x}
-          y2={edge.target.y}
-          stroke={edge.strength > 0.42 ? "url(#nn-signal-line)" : "var(--foreground)"}
-          strokeOpacity={0.05 + edge.strength * 0.32}
-          strokeWidth={0.3 + edge.strength * 0.75}
-        />
+      {[0, 1].flatMap((layer) =>
+        points[layer].flatMap((source, i) =>
+          points[layer + 1].map((target, j) => (
+            <line
+              key={`${layer}-${i}-${j}`}
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke={
+                (layers?.[layer + 1].weights[j][i] ?? 0) < 0 ? "var(--foreground)" : "var(--accent)"
+              }
+              strokeWidth="0.65"
+              strokeOpacity={
+                pass && stage > layer + 1
+                  ? 0.04 +
+                    (Math.abs(contributions[layer][i * points[layer + 1].length + j]) /
+                      maxContribution[layer]) *
+                      0.55
+                  : 0.035
+              }
+            />
+          )),
+        ),
+      )}
+      {points.map((layer, l) =>
+        layer.map((p, n) => {
+          const active = !!pass && stage >= l + 1;
+          const inspected = l < 2 && selected.layer === l && selected.neuron === n;
+          return (
+            <g
+              key={`${l}-${n}`}
+              role={l < 2 ? "button" : undefined}
+              tabIndex={l < 2 ? 0 : undefined}
+              aria-label={l < 2 ? `Inspect hidden layer ${l + 1}, neuron ${n + 1}` : undefined}
+              aria-pressed={l < 2 ? inspected : undefined}
+              onClick={() => {
+                if (l < 2) onSelect(l, n);
+              }}
+              onKeyDown={(event) => {
+                if (l < 2 && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  onSelect(l, n);
+                }
+              }}
+              className={l < 2 ? "digit-neuron" : ""}
+            >
+              <title>
+                {l < 2 ? `Hidden layer ${l + 1}, neuron ${n + 1}` : `Digit ${n}`}:{" "}
+                {active ? values[l][n].toFixed(4) : "waiting"}
+              </title>
+              <circle cx={p.x} cy={p.y} r="8" fill="transparent" />
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r={inspected ? 5.6 : 4.5}
+                fill={active ? "var(--accent)" : "var(--background)"}
+                fillOpacity={active ? 0.15 + brightness[l][n] * 0.85 : 1}
+                stroke="var(--accent)"
+                strokeWidth={inspected ? 2 : 1}
+                strokeOpacity={active || inspected ? 1 : 0.25}
+              />
+              {l === 2 && (
+                <text x={p.x + 14} y={p.y + 3} fontSize="10" fill="var(--foreground)">
+                  {n}
+                </text>
+              )}
+            </g>
+          );
+        }),
+      )}
+      {[
+        { x: 42, text: "784 PIXELS" },
+        { x: 154, text: "HIDDEN 1" },
+        { x: 310, text: "HIDDEN 2" },
+        { x: 466, text: "OUTPUT" },
+      ].map((label) => (
+        <text
+          key={label.text}
+          x={label.x}
+          y="304"
+          textAnchor="middle"
+          fontSize="9"
+          letterSpacing="1"
+          fill="var(--muted-foreground)"
+        >
+          {label.text}
+        </text>
       ))}
-      {signalEdges.map((edge, index) => (
-        <circle key={"signal-" + edge.key} r="1.7" fill="var(--nn-secondary)">
-          <animateMotion
-            dur="1.8s"
-            begin={index * 120 + "ms"}
-            repeatCount="1"
-            path={
-              "M " +
-              edge.source.x +
-              " " +
-              edge.source.y +
-              " L " +
-              edge.target.x +
-              " " +
-              edge.target.y
-            }
-          />
-        </circle>
-      ))}
-
-      {hiddenOne.map((point, index) => (
-        <Neuron key={"hidden-one-" + index} point={point} value={pass.hiddenOne[index]!} />
-      ))}
-      {hiddenTwo.map((point, index) => (
-        <Neuron key={"hidden-two-" + index} point={point} value={pass.hiddenTwo[index]!} />
-      ))}
-      {output.map((point, index) => (
-        <Neuron
-          key={"output-" + index}
-          point={point}
-          value={pass.output[index]!}
-          highlighted={index === Number(prediction)}
-        />
-      ))}
-
-      <DiagramLabel x={32} label="784 PIXELS" />
-      <DiagramLabel x={126} label="16 FEATURES" />
-      <DiagramLabel x={232} label="16 PATTERNS" />
-      <DiagramLabel x={340} label="10 CLASSES" />
     </svg>
   );
 }
 
-function Neuron({
-  point,
-  value,
-  highlighted = false,
+function NeuronInspector({
+  pass,
+  layers,
+  selected,
+  onSelect,
 }: {
-  point: Point;
-  value: number;
-  highlighted?: boolean;
+  pass: DigitPass | null;
+  layers: DigitModel["layers"];
+  selected: { layer: number; neuron: number };
+  onSelect: (value: { layer: number; neuron: number }) => void;
 }) {
+  const { layer, neuron } = selected;
+  const weights = layers[layer].weights[neuron],
+    bias = layers[layer].biases[neuron];
+  const z = pass?.sums[layer][neuron],
+    activation = pass?.activations[layer + 1][neuron];
+  const previous = pass?.activations[layer];
+  const contributions = weights
+    .map((w, i) => ({ i, w, value: w * (previous?.[i] ?? 0) }))
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    .slice(0, 3);
   return (
-    <g>
-      <circle
-        cx={point.x}
-        cy={point.y}
-        r={2.7 + value * 3.1}
-        fill="var(--background)"
-        stroke={highlighted ? "var(--nn-secondary)" : "var(--nn-theme)"}
-        strokeOpacity={0.35 + value * 0.65}
-        strokeWidth="1.2"
-      />
-      <circle
-        cx={point.x}
-        cy={point.y}
-        r={0.9 + value * 1.3}
-        fill="var(--nn-theme)"
-        opacity={0.25 + value * 0.75}
-      />
-    </g>
-  );
-}
-
-function DiagramLabel({ x, label }: { x: number; label: string }) {
-  return (
-    <text
-      x={x}
-      y="181"
-      textAnchor="middle"
-      fill="var(--muted-foreground)"
-      fontFamily="var(--font-mono)"
-      fontSize="6.2"
-      letterSpacing="0.9"
-    >
-      {label}
-    </text>
-  );
-}
-
-function forwardPass(input: number[]): ForwardPass {
-  const hiddenOne = hiddenLayer(input, FEATURE_MASKS);
-  const hiddenTwo = hiddenLayer(hiddenOne, HIDDEN_WEIGHTS);
-  const logits = DIGITS.map((_, index) =>
-    OUTPUT_WEIGHTS[index]!.reduce(
-      (sum, weight, sourceIndex) => sum + weight * hiddenTwo[sourceIndex]!,
-      OUTPUT_BIASES[index]!,
-    ),
-  );
-  const maxLogit = Math.max(...logits);
-  const exponentials = logits.map((logit) => Math.exp(logit - maxLogit));
-  const total = exponentials.reduce((sum, value) => sum + value, 0);
-  return {
-    input,
-    hiddenOne,
-    hiddenTwo,
-    output: exponentials.map((value) => value / total),
-  };
-}
-
-function hiddenLayer(input: number[], weights: number[][]) {
-  return weights.map((unitWeights) => {
-    const weightedSum = unitWeights.reduce(
-      (sum, weight, index) => sum + weight * (input[index] ?? 0),
-      0,
-    );
-    const scale = unitWeights.reduce((sum, weight) => sum + Math.abs(weight), 0) || 1;
-    return sigmoid((weightedSum / scale - 0.28) * 10);
-  });
-}
-
-function rasterizeGlyph(rows: readonly string[]) {
-  return Array.from({ length: INPUT_SIZE }, (_, index) => {
-    const x = index % IMAGE_SIZE;
-    const y = Math.floor(index / IMAGE_SIZE);
-    const glyphX = Math.min(rows[0]!.length - 1, Math.floor((x / IMAGE_SIZE) * rows[0]!.length));
-    const glyphY = Math.min(rows.length - 1, Math.floor((y / IMAGE_SIZE) * rows.length));
-    return rows[glyphY]![glyphX] === "1" ? 1 : 0;
-  });
-}
-
-function featureWeight(featureIndex: number, x: number, y: number) {
-  if (featureIndex < 5) {
-    const bandY = [3, 8, 13, 18, 23][featureIndex]!;
-    return Math.abs(y - bandY) <= 1 ? 1 : 0;
-  }
-  if (featureIndex < 9) {
-    const bandX = [3, 9, 15, 21][featureIndex - 5]!;
-    return Math.abs(x - bandX) <= 1 ? 1 : 0;
-  }
-  if (featureIndex === 9) return Math.abs(x - y) <= 1 ? 1 : 0;
-  if (featureIndex === 10) return Math.abs(x + y - (IMAGE_SIZE - 1)) <= 1 ? 1 : 0;
-  if (featureIndex === 11) return x < IMAGE_SIZE / 2 && y < IMAGE_SIZE / 2 ? 1 : 0;
-  if (featureIndex === 12) return x >= IMAGE_SIZE / 2 && y < IMAGE_SIZE / 2 ? 1 : 0;
-  if (featureIndex === 13) return x < IMAGE_SIZE / 2 && y >= IMAGE_SIZE / 2 ? 1 : 0;
-  if (featureIndex === 14) return x >= IMAGE_SIZE / 2 && y >= IMAGE_SIZE / 2 ? 1 : 0;
-  return Math.abs(x - IMAGE_SIZE / 2) < 5 && Math.abs(y - IMAGE_SIZE / 2) < 5 ? 1 : 0;
-}
-
-function sigmoid(value: number) {
-  return 1 / (1 + Math.exp(-value));
-}
-
-function layerPoints(x: number, count: number, padding: number, height: number): Point[] {
-  return Array.from({ length: count }, (_, index) => ({
-    x,
-    y: padding / 2 + (index + 1) * (height / (count + 1)),
-  }));
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-2xl leading-none text-foreground">{value}</div>
-      <div className="mt-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-        {label}
+    <div className="digit-inspector">
+      <p className="digit-eyebrow">Open the black box</p>
+      <h3>Inside one neuron.</h3>
+      <div className="digit-inspector-selects">
+        <label>
+          Layer
+          <select
+            value={layer}
+            onChange={(event) => onSelect({ layer: Number(event.target.value), neuron })}
+          >
+            <option value={0}>Hidden layer 1</option>
+            <option value={1}>Hidden layer 2</option>
+          </select>
+        </label>
+        <label>
+          Neuron
+          <select
+            value={neuron}
+            onChange={(event) => onSelect({ layer, neuron: Number(event.target.value) })}
+          >
+            {Array.from({ length: 16 }, (_, i) => (
+              <option key={i} value={i}>
+                Neuron {i + 1}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
+      <div className="digit-neuron-details">
+        {layer === 0 ? (
+          <PixelImage
+            pixels={weights}
+            signed
+            label="Selected neuron's learned weights: green positive, ink negative"
+          />
+        ) : (
+          <div className="digit-weight-list" aria-label="Weights from the previous 16 neurons">
+            {weights.map((w, i) => (
+              <span
+                key={i}
+                title={`Connection ${i + 1}: ${w.toFixed(4)}`}
+                style={{
+                  opacity:
+                    0.18 + Math.min(1, Math.abs(w) / Math.max(...weights.map(Math.abs))) * 0.82,
+                  backgroundColor: w < 0 ? "var(--foreground)" : "var(--accent)",
+                }}
+              />
+            ))}
+          </div>
+        )}
+        <dl>
+          <div>
+            <dt>Weighted sum Σ(w × a)</dt>
+            <dd>{z === undefined ? "—" : (z - bias).toFixed(3)}</dd>
+          </div>
+          <div>
+            <dt>Bias b</dt>
+            <dd>{bias.toFixed(3)}</dd>
+          </div>
+          <div>
+            <dt>ReLU: max(0, sum + b)</dt>
+            <dd>{activation === undefined ? "—" : activation.toFixed(3)}</dd>
+          </div>
+        </dl>
+      </div>
+      <p className="digit-help">
+        {layer === 0
+          ? "Each square is a learned input weight. Green is positive; dark ink is negative."
+          : "Each bar is a connection from one of the previous 16 neurons."}{" "}
+        Brightness shows weight magnitude; it does not label a neuron as a particular shape.
+      </p>
+      {pass && (
+        <p className="digit-contributions">
+          Largest contributions:{" "}
+          {contributions
+            .map(
+              (c) =>
+                `${layer === 0 ? "pixel" : "neuron"} ${c.i + 1}: ${c.value >= 0 ? "+" : ""}${c.value.toFixed(2)}`,
+            )
+            .join(" · ")}
+        </p>
+      )}
     </div>
   );
 }

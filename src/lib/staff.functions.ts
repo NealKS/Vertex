@@ -18,7 +18,7 @@ export const listStaffInvites = createServerFn({ method: "GET" })
 
 export const issueStaffInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({
         role: z.enum(["judge", "mentor"]),
@@ -50,7 +50,7 @@ export const issueStaffInvite = createServerFn({ method: "POST" })
 
 export const revokeStaffInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
@@ -64,7 +64,7 @@ export const revokeStaffInvite = createServerFn({ method: "POST" })
 
 export const redeemStaffInvite = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) =>
+  .validator((input: unknown) =>
     z
       .object({ code: z.string().trim().min(4).max(20), role: z.enum(["judge", "mentor"]) })
       .parse(input),

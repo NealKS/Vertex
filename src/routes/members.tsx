@@ -35,10 +35,10 @@ function MembersPage() {
         ...["Founder", "President", "Vice President"].flatMap((role) =>
           directory.all.filter((member) => member.role === role),
         ),
-        ...directory.teams.flatMap((team) => [...(team.head ? [team.head] : []), ...team.members]),
+        ...directory.teams.flatMap((team) => [...team.heads, ...team.members]),
       ]
     : activeTeam
-      ? [...(activeTeam.head ? [activeTeam.head] : []), ...activeTeam.members]
+      ? [...activeTeam.heads, ...activeTeam.members]
       : [];
 
   const searchMatches = useMemo(() => {
@@ -163,7 +163,7 @@ function MembersPage() {
                 All · {directory.all.length}
               </button>
               {directory.teams.map((team) => {
-                const count = (team.head ? 1 : 0) + team.members.length;
+                const count = team.heads.length + team.members.length;
                 return (
                   <button
                     key={team.id}

@@ -4,7 +4,11 @@ import { NEURAL_NETWORK_WORKSHOP as event } from "@/data/neural-network-workshop
 
 export function NeuralNetworkWorkshopCard() {
   return (
-    <article className="surface-card overflow-hidden rounded-2xl">
+    <Link
+      to="/events/neural-networks-from-scratch"
+      aria-label={`Open ${event.title}`}
+      className="surface-card group block overflow-hidden rounded-2xl transition-transform duration-300 hover:-translate-y-1 hover:border-silver/70"
+    >
       <div className="grid gap-0 lg:grid-cols-[0.7fr_1.3fr]">
         <div className="grid-backdrop relative flex min-h-56 flex-col justify-between border-b border-hairline p-6 lg:border-b-0 lg:border-r">
           <div className="relative">
@@ -41,14 +45,11 @@ export function NeuralNetworkWorkshopCard() {
               </div>
             </dl>
           </div>
-          <Link
-            to="/events/neural-networks-from-scratch"
-            className="btn-primary mt-8 w-fit rounded-lg px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest"
-          >
+          <span className="btn-primary mt-8 w-fit rounded-lg px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest">
             View workshop <ArrowUpRight size={14} />
-          </Link>
+          </span>
         </div>
       </div>
-    </article>
+    </Link>
   );
 }

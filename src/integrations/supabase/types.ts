@@ -8,6 +8,28 @@ export type Database = {
   };
   public: {
     Tables: {
+      hackathon_review_emails: {
+        Row: {
+          id: string;
+          registration_id: string;
+          payload: Json;
+          first_attempt_at: string | null;
+          claimed_at: string | null;
+          sent_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id: string;
+          payload: Json;
+          first_attempt_at?: string | null;
+          claimed_at?: string | null;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Update: { claimed_at?: string | null; sent_at?: string | null };
+        Relationships: [];
+      };
       achievements: {
         Row: {
           created_at: string;
@@ -368,9 +390,23 @@ export type Database = {
       };
       event_registrations: {
         Row: {
+          reconsidering: boolean;
+          reversal_reason: string | null;
+          previous_status: string | null;
+          reviewed_by_user_id: string | null;
+          guide_missing: boolean;
+          review_note: string | null;
+          email_sent_at: string | null;
+          code: string;
+          status: "pending" | "approved" | "rejected" | "waitlisted";
+          form_data: Json;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
+          pass_sent_at: string | null;
+          pass_sent_to: string | null;
+          workspace_registration: Json | null;
           checked_in_at: string | null;
           checked_in_by: string | null;
-          code: string;
           created_at: string;
           email: string;
           event_id: string;
@@ -380,6 +416,20 @@ export type Database = {
           usn: string | null;
         };
         Insert: {
+          reconsidering?: boolean;
+          reversal_reason?: string | null;
+          previous_status?: string | null;
+          reviewed_by_user_id?: string | null;
+          guide_missing?: boolean;
+          review_note?: string | null;
+          email_sent_at?: string | null;
+          status?: "pending" | "approved" | "rejected" | "waitlisted";
+          form_data?: Json;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          pass_sent_at?: string | null;
+          pass_sent_to?: string | null;
+          workspace_registration?: Json | null;
           checked_in_at?: string | null;
           checked_in_by?: string | null;
           code?: string;
@@ -392,6 +442,20 @@ export type Database = {
           usn?: string | null;
         };
         Update: {
+          reconsidering?: boolean;
+          reversal_reason?: string | null;
+          previous_status?: string | null;
+          reviewed_by_user_id?: string | null;
+          guide_missing?: boolean;
+          review_note?: string | null;
+          email_sent_at?: string | null;
+          status?: "pending" | "approved" | "rejected" | "waitlisted";
+          form_data?: Json;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
+          pass_sent_at?: string | null;
+          pass_sent_to?: string | null;
+          workspace_registration?: Json | null;
           checked_in_at?: string | null;
           checked_in_by?: string | null;
           code?: string;
@@ -412,6 +476,162 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      event_operation_settings: {
+        Row: {
+          event_id: string;
+          registration_mode: "individual" | "team" | "disabled";
+          registration_open: boolean;
+          registration_opens_at: string | null;
+          registration_closes_at: string | null;
+          requires_approval: boolean;
+          waitlist_enabled: boolean;
+          passes_enabled: boolean;
+          checkin_enabled: boolean;
+          email_enabled: boolean;
+          team_min_size: number;
+          team_max_size: number;
+          submissions_enabled: boolean;
+          judging_enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          event_id: string;
+          registration_mode?: "individual" | "team" | "disabled";
+          registration_open?: boolean;
+          registration_opens_at?: string | null;
+          registration_closes_at?: string | null;
+          requires_approval?: boolean;
+          waitlist_enabled?: boolean;
+          passes_enabled?: boolean;
+          checkin_enabled?: boolean;
+          email_enabled?: boolean;
+          team_min_size?: number;
+          team_max_size?: number;
+          submissions_enabled?: boolean;
+          judging_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          event_id?: string;
+          registration_mode?: "individual" | "team" | "disabled";
+          registration_open?: boolean;
+          registration_opens_at?: string | null;
+          registration_closes_at?: string | null;
+          requires_approval?: boolean;
+          waitlist_enabled?: boolean;
+          passes_enabled?: boolean;
+          checkin_enabled?: boolean;
+          email_enabled?: boolean;
+          team_min_size?: number;
+          team_max_size?: number;
+          submissions_enabled?: boolean;
+          judging_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      event_staff_access: {
+        Row: {
+          id: string;
+          event_id: string;
+          email: string;
+          permission: "manager" | "checkin" | "viewer";
+          active: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          email: string;
+          permission: "manager" | "checkin" | "viewer";
+          active?: boolean;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          event_id?: string;
+          email?: string;
+          permission?: "manager" | "checkin" | "viewer";
+          active?: boolean;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      event_registration_fields: {
+        Row: {
+          id: string;
+          event_id: string;
+          field_key: string;
+          label: string;
+          field_type: string;
+          required: boolean;
+          active: boolean;
+          options: Json;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          field_key: string;
+          label: string;
+          field_type?: string;
+          required?: boolean;
+          active?: boolean;
+          options?: Json;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          event_id?: string;
+          field_key?: string;
+          label?: string;
+          field_type?: string;
+          required?: boolean;
+          active?: boolean;
+          options?: Json;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      neural_network_workshop_registration_activity: {
+        Row: {
+          id: string;
+          registration_id: string;
+          action: "approved" | "rejected" | "pass_sent" | "pass_resent";
+          actor_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id: string;
+          action: "approved" | "rejected" | "pass_sent" | "pass_resent";
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          registration_id?: string;
+          action?: "approved" | "rejected" | "pass_sent" | "pass_resent";
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
       };
       event_workspaces: {
         Row: {
@@ -949,39 +1169,90 @@ export type Database = {
       neural_network_workshop_registrations: {
         Row: {
           attend_reason: string;
+          checked_in_at: string | null;
+          checked_in_by: string | null;
           created_at: string;
           department: string;
           email: string;
           expectation: string;
           id: string;
           name: string;
+          pass_sent_at: string | null;
           phone: string;
+          qr_token: string | null;
+          reviewed_at: string | null;
+          reviewed_by: string | null;
           srn: string;
+          status: string;
           year: string;
         };
         Insert: {
           attend_reason: string;
+          checked_in_at?: string | null;
+          checked_in_by?: string | null;
           created_at?: string;
           department: string;
           email: string;
           expectation: string;
           id?: string;
           name: string;
+          pass_sent_at?: string | null;
           phone: string;
+          qr_token?: string | null;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
           srn: string;
+          status?: string;
           year: string;
         };
         Update: {
           attend_reason?: string;
+          checked_in_at?: string | null;
+          checked_in_by?: string | null;
           created_at?: string;
           department?: string;
           email?: string;
           expectation?: string;
           id?: string;
           name?: string;
+          pass_sent_at?: string | null;
           phone?: string;
+          qr_token?: string | null;
+          reviewed_at?: string | null;
+          reviewed_by?: string | null;
           srn?: string;
+          status?: string;
           year?: string;
+        };
+        Relationships: [];
+      };
+      neural_network_workshop_staff: {
+        Row: {
+          active: boolean;
+          created_at: string;
+          created_by: string | null;
+          email: string;
+          id: string;
+          permission: string;
+          updated_at: string;
+        };
+        Insert: {
+          active?: boolean;
+          created_at?: string;
+          created_by?: string | null;
+          email: string;
+          id?: string;
+          permission: string;
+          updated_at?: string;
+        };
+        Update: {
+          active?: boolean;
+          created_at?: string;
+          created_by?: string | null;
+          email?: string;
+          id?: string;
+          permission?: string;
+          updated_at?: string;
         };
         Relationships: [];
       };
@@ -1199,6 +1470,43 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      prepare_sarvam_guide_retry: {
+        Args: { p_id: string; p_expected: string; p_payload: Json };
+        Returns: boolean;
+      };
+      is_hackathon_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
+      queue_sarvam_reconsideration: {
+        Args: { p_id: string; p_queued: boolean };
+        Returns: boolean;
+      };
+      reconsider_sarvam_submission: {
+        Args: {
+          p_id: string;
+          p_status: string;
+          p_reviewer: string;
+          p_note: string;
+          p_payload: Json;
+        };
+        Returns: boolean;
+      };
+      review_sarvam_submission: {
+        Args: {
+          p_id: string;
+          p_status: string;
+          p_reviewer: string;
+          p_note: string;
+          p_payload: Json;
+        };
+        Returns: boolean;
+      };
+      claim_sarvam_review_email: {
+        Args: { p_id: string };
+        Returns: Database["public"]["Tables"]["hackathon_review_emails"]["Row"][];
+      };
+      complete_sarvam_review_email: {
+        Args: { p_id: string; p_claimed_at: string };
+        Returns: undefined;
+      };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];
