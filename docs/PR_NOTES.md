@@ -1,66 +1,59 @@
-# Vertex hackathon admin
+# Vertex live hackathon admin
 
-## Theme
+## What changed
 
-The header includes a light/dark toggle on desktop and mobile. It follows the system preference until explicitly selected, remembers the choice locally, synchronizes tabs, and applies before rendering to avoid a light flash. Shared cards, dialogs, forms, buttons and glass surfaces use the theme palette.
+- Removed development mock sessions, sample data and preview flows. Submissions and teams use the same `event_registrations` rows written by the public Sarvam form. Supabase Realtime refreshes lists with a five-second polling fallback.
+- Hackathon reads, decisions, exports and announcement writes require a verified signed-in email in both the app allowlist and database admin list. Existing admin/head roles alone do not grant hackathon access.
+- One-click approval, rejection and reversal record the deciding admin email and time. Emails go only to the team leader, with transactional outbox claims, duplicate protection and a **Resend email** recovery action.
+- Reconsideration preserves the current decision until reversed, does not navigate away when queued, and supports search, track/status filters and counts. Reversal reasons are recorded automatically; previous decisions and email snapshots remain in private history.
+- Approval emails contain the final event copy and an in-memory, three-page A4 PDF guide generated with `pdf-lib`. Rejections have the supplied copy and no attachment. PDF failure sends the approval without its guide, flags the card and allows a fresh guide resend.
+- Approved, rejected and reversed CSV exports contain live data, leader contacts only, saved reviewer email, timestamp and `INITIAL`/`REVERSED` markers. Prior status and reversal reason are included; reversed rows appear first. CSV uses UTF-8 BOM, quoting and spreadsheet-formula protection.
+- Team detail dialogs show the complete idea, saved HTTP(S) presentation links and member details. The existing form does not collect PPT uploads; this change does not add uploads. Public announcements, responsive cards and the existing light/dark theme remain available.
 
-## What was built
+## Migration: run manually before deploying
 
-- `/admin/submissions`: compact idea cards, details, status/track filters, search, live refresh, allowlist-only approval/rejection, leader email delivery/retry, and approved-only CSV export.
-- `/admin/teams`: searchable team details, status and four-member validation filters.
-- `/admin/announcements`: create, edit, pin and delete updates, shared with public `/announcements`.
-- Server-side verified-session checks, normalized email allowlist and transactional review/email outbox. Admin/head roles allow reading; mutations remain allowlist-only.
-- Development mock mode: fake verified session for `neal.kottilingal.in@gmail.com`, eight four-person teams, three announcements, localStorage persistence, cross-tab updates, simulated submissions, reset, and the real email template rendered as a preview. No Supabase requests or email sends are needed for these mock pages.
+Run **`supabase/migrations/20261112000000_hackathon_live.sql`** after the existing foundation migrations in Supabase SQL Editor. This is the single, rerunnable migration for this feature. It creates/seeds `admin_emails`, adds review/guide/reconsideration metadata and private outbox/history tables, installs service-only review RPCs, updates RLS and enables Realtime for the affected tables when the standard publication exists.
 
-## Try locally without Supabase
+**No SQL was run against the user's database.** Migration idempotency and permissions were exercised only in isolated PGlite tests.
 
-Copy `.env.example` to `.env` only if you do not already have one; otherwise add `VITE_MOCK_MODE=true` to the existing file. Run `npm ci`, then `npm run dev -- --host 127.0.0.1 --port 3000` and open `/admin/submissions`.
+`neal.kottilingal.in@gmail.com` is included in BOTH places:
 
-Mock mode requires both the exact flag `true` and `import.meta.env.DEV`. Production builds disable the fake session and exclude the mock store even if the flag is set. Do not configure this flag on Vercel. Real server functions still enforce authentication and the allowlist. Set the flag to `false` and restart to use Supabase.
+1. `src/lib/admin-emails.ts`: add one quoted email line to `FALLBACK_ADMIN_EMAILS` (or use server-only `ADMIN_EMAILS`).
+2. The migration: add one `INSERT INTO public.admin_emails(email) VALUES ('new-admin@example.org') ON CONFLICT DO NOTHING;` line. Use a lowercase, trimmed email and apply this insert yourself.
 
-Use **Simulate new submission**, then approve/reject a pending card to inspect its email preview. Sample approval links use `example.invalid`; they are visibly placeholders. **Reset sample data** restores eight submissions and three announcements. Browser data lives under `vertex-hackathon-mock-v1`; it is never synced to Supabase.
+An admin must exist in both lists and sign in with a confirmed Supabase email. The database list cannot be edited by browser clients. RLS uses that list for Sarvam submission reads/status updates and event announcement writes; published event announcements remain anonymously readable. Existing club announcement permissions are unchanged.
 
-## Reconsideration workflow
+## Vercel environment variables
 
-Approved and rejected cards each have **Reconsider**. This moves the team into a separate Reconsideration section while preserving its current status. The section uses the same cards, search, status counts and track filters. **Approve** or **Reject** reverses the decision with a mandatory reason; **Keep current decision** returns it unchanged without email. Completed reviews return to the main list.
+Set these in **Project Settings → Environment Variables**, then redeploy:
 
-Both reversal directions preserve private decision/email history and use a new email idempotency key. Updated selection/withdrawal emails retain the existing design and event details, with distinct subject, heading, explanation and reason. Pending submissions retain the original email copy. In-flight delivery blocks reversal for one minute.
+| Variable                                                    | Value                                                                                                                                  |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_EMAILS`                                              | Comma-separated additional allowed emails; trimmed and case-insensitive. Also seed each in `admin_emails`. Neal is already a fallback. |
+| `RESEND_API_KEY`                                            | Server-only Resend API key.                                                                                                            |
+| `FROM_EMAIL`                                                | `Vertex Club <events@abscissa.dev>` (default); verify the sender domain in Resend.                                                     |
+| `EVENTS_REPLY_TO`                                           | `events@abscissa.dev` (default).                                                                                                       |
+| `SUPABASE_URL`, `VITE_SUPABASE_URL`                         | The same Supabase project URL.                                                                                                         |
+| `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY` | The same project publishable/anon key.                                                                                                 |
+| `SUPABASE_SERVICE_ROLE_KEY`                                 | Server-only service-role key. Never prefix this or the Resend key with `VITE_`.                                                        |
 
-Approved and rejected CSV exports include the prior decision and reversal reason, with reversed rows listed first and marked **REVERSED DECISION**. Exports include only the team leader’s contact details, plus the approving/rejecting reviewer’s email. Reviewer email is resolved from the recorded reviewer account ID during export (its current email); missing/deleted reviewers are marked unavailable. Other members’ personal details stay in the admin detail view, not the CSV. CSV cannot store cell colors; the explicit label distinguishes these rows in any spreadsheet viewer. **Export reversed decisions (CSV)** includes the latest reversal for both currently approved and rejected teams; full history remains in the private audit table. Queued approved teams remain approved in the export until a reversal is confirmed.
+Copy Supabase values from **Supabase → Project Settings → API** (API Keys for keys). The browser reads exactly `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; server auth uses the unprefixed equivalents. `.env.example` contains no credentials. `.env` and local overrides are gitignored. No mock flag is needed or supported.
 
-## Full submission view
+Email copy, links, rules, prizes and schedule live in `src/lib/hackathonEmail.ts`; the supplied final values are filled in, with no event placeholders. PDF generation uses no runtime filesystem access.
 
-Click a team/project banner in submissions or reconsideration to open the complete idea and saved presentation/attachment links. The team lead name and email remain visible on the card. **Member personal details** shows every field collected by the Sarvam form: name, email, contact number, USN/SRN, college, branch and year, with the team lead identified. The Teams page uses the same details view. Missing values are labelled, never invented.
+## Validation and manual deployment checklist
 
-The current Sarvam form does not collect presentation uploads. Saved HTTP(S) presentation URLs and attachment links are displayed if present in the registration data; private storage paths are not converted into public URLs. This change does not add an upload flow or alter access permissions.
+Passed locally: `npm run lint` (0 errors, 317 existing warnings), `npx tsc --noEmit`, `npm run build`, `npm run test:registration`, `node scripts/test-hackathon-admin.mjs`, `node scripts/test-hackathon-message.mjs`, and isolated database/RLS tests documented in `hackathon-admin-setup.md`. The generated three-page PDF was rendered and visually checked.
 
-## Migration and deployment
+After configuring a test deployment and applying the migration:
 
-Run `supabase/migrations/20261109000000_sarvam_admin_review.sql`, then `supabase/migrations/20261110000000_sarvam_reconsideration.sql`, then `supabase/migrations/20261111000000_sarvam_reconsideration_queue.sql`, after the existing migrations and before deploying. It adds review metadata, a private email outbox, service-only review/claim/completion RPCs, write restrictions and Realtime publication support. No live migration was run during development.
+- [ ] Sign in as Neal; verify submissions, teams and announcements load. Confirm an unlisted account cannot read submissions, export, decide, retry or write announcements, even with a legacy admin/head role.
+- [ ] Submit an actual four-member team through the public Sarvam form; verify it appears live on another admin tab. Temporarily disconnect Realtime and verify polling catches updates.
+- [ ] Approve and reject separate pending teams; verify recorded admin email/time, one email to the leader only, exact copy, approval PDF and no rejection attachment. Double-click/retry must not duplicate delivery.
+- [ ] Exercise provider failure: decision stays saved; **Resend email** retries the same outbox. Exercise PDF failure: approval sends without the guide and a later successful resend includes it.
+- [ ] Queue approved/rejected teams without navigation, then reverse each direction. Confirm new-decision email, automatic reversal reason and private history.
+- [ ] Export all three CSVs; verify actual status, reversed marker/reason, reviewer email, leader-only contacts and correct dates/escaping.
+- [ ] Create/edit/pin/delete event announcements; check public `/announcements` in a signed-out tab.
+- [ ] Check team details/PPT links, filters, dark/light modes and a 390px-wide screen.
 
-Set these in **Vercel → Project Settings → Environment Variables**, then redeploy:
-
-| Variable                                                    | Value to supply                                                                                                                    |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `ADMIN_EMAILS`                                              | Comma-separated authorized email addresses. Trimmed and case-insensitive; combines with the fallback in `src/lib/admin-emails.ts`. |
-| `RESEND_API_KEY`                                            | Resend API key, server only.                                                                                                       |
-| `FROM_EMAIL`                                                | Verified Resend sender address.                                                                                                    |
-| `SUPABASE_URL`, `VITE_SUPABASE_URL`                         | Supabase project URL.                                                                                                              |
-| `SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY` | Project publishable/anon key.                                                                                                      |
-| `SUPABASE_SERVICE_ROLE_KEY`                                 | Server-only service-role key; never prefix with `VITE_`.                                                                           |
-
-Copy Supabase values from **Project Settings → API**. No real credentials are included in `.env.example`; `.env` and local environment overrides are ignored by Git.
-
-## Fill before real approvals
-
-Edit `src/lib/hackathonEmail.ts`: `WHATSAPP_GROUP_LINK`, `INDUS_LINK`, `SARVAM_LINKS`, `RULES`, and `SCHEDULE`. Approval requires the first two HTTPS links and configured email delivery. Mock placeholders do not change the real configuration.
-
-## Validation
-
-- `npm run lint` (pre-existing repository warnings remain).
-- `npx tsc --noEmit` and `npm run build` with the mock flag enabled.
-- `node scripts/test-hackathon-admin.mjs` and `node scripts/test-mock-mode.mjs`: allowlist normalization, CSV escaping/approved-only output, email content, sample data, storage persistence, live events, announcement CRUD and production guards.
-- Browser checks: review previews, search/filters, simulated live submissions, teams, admin/public announcements and 390px mobile layout.
-- Isolated database/RLS tests: see `docs/hackathon-admin-setup.md` for the optional PGlite command.
-
-Tested in mock mode; real login, realtime and email need checking after migration.
+Real Supabase login, Realtime and Resend delivery still require this configured-deployment check. No real emails were sent during development. Email sent means accepted by Resend, not guaranteed inbox delivery.
