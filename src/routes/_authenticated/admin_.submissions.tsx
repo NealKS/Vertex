@@ -180,8 +180,7 @@ function SubmissionsPage() {
               <h2 className="font-display text-2xl font-semibold">Reconsideration</h2>
               <p className="mt-2 text-sm text-muted-foreground">
                 Each team keeps its current approved or rejected status until you confirm a new
-                decision. Reversing a decision requires a reason and sends an updated decision
-                email.
+                decision. Approve or Reject saves and emails the new decision in one click.
               </p>
               <button
                 disabled={exporting}

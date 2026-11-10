@@ -161,7 +161,7 @@ export async function reviewSubmission(
       p_id: input.id,
       p_status: input.status,
       p_reviewer: context.userId,
-      p_note,
+      p_note: note,
       p_payload: payload,
     },
   );
