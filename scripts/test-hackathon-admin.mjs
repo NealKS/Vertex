@@ -82,7 +82,7 @@ assert.match(csv, /"A ""quoted"", idea\ncontinued"/);
 assert.match(csv, /"'\+919876543210"/);
 assert.doesNotMatch(csv, /Do not export me/);
 assert.match(approvedCsv([{ ...row, team: "\t=1+1" }]), /"'\t=1\+1"/);
-assert.match(csv, /Leader email/);
+assert.match(csv, /Team leader email/);
 assert.doesNotMatch(csv, /All members/);
 const contactExport = approvedCsv([
   {
@@ -100,13 +100,13 @@ const contactExport = approvedCsv([
     ],
   },
 ]);
-assert.match(contactExport, /Approved by email/);
+assert.match(contactExport, /Approved by \(admin email\)/);
 assert.match(contactExport, /reviewer@example.test/);
 assert.match(contactExport, /lead@example.test/);
 assert.doesNotMatch(contactExport, /Private Member|private-member@example.test|555PRIVATE/);
 assert.match(
   rejectedCsv([{ ...row, status: "rejected", reviewedByEmail: "rejector@example.test" }]),
-  /Rejected by email/,
+  /Approved by \(admin email\)/,
 );
 
 const reversedApproved = {
@@ -122,11 +122,11 @@ const reversedRejected = {
   reversalReason: "Missing integration",
 };
 const mainApproved = approvedCsv([row, reversedApproved, reversedRejected]);
-assert.match(mainApproved, /REVERSED DECISION/);
+assert.match(mainApproved, /"REVERSED"/);
 assert.match(mainApproved, /Selected after reassessment/);
 assert.doesNotMatch(mainApproved, /Missing integration/);
 const rejectedExport = rejectedCsv([row, reversedApproved, reversedRejected]);
-assert.match(rejectedExport, /REVERSED DECISION/);
+assert.match(rejectedExport, /"REVERSED"/);
 assert.match(rejectedExport, /Missing integration/);
 assert.doesNotMatch(rejectedExport, /Selected after reassessment/);
 assert.match(rejectedExport, /Withdrawn idea/);

@@ -144,22 +144,16 @@ export function approvedCsv(
   const cell = (value: string) =>
     `"${(formula.test(value) ? "'" + value : value).replaceAll('"', '""')}"`;
   const header = [
-    "Decision origin",
     "Team name",
     "Project title",
     "Track",
     "Idea summary",
     "Team leader name",
-    "Leader email",
-    "Leader phone",
-    reversals
-      ? "Decision by email"
-      : status === "approved"
-        ? "Approved by email"
-        : "Rejected by email",
-    "Project, presentation and attachment links",
-    "Submitted at",
-    "Reviewed at",
+    "Team leader email",
+    "Team leader phone",
+    "Approved by (admin email)",
+    "Approved at",
+    "Decision origin",
     "Current decision",
     "Previous decision",
     "Reason for reversing decision",
@@ -168,7 +162,6 @@ export function approvedCsv(
     .filter((row) => (reversals ? Boolean(row.reversalReason) : row.status === status))
     .sort((a, b) => Number(Boolean(b.reversalReason)) - Number(Boolean(a.reversalReason)))
     .map((row) => [
-      row.reversalReason ? "REVERSED DECISION" : "INITIAL DECISION",
       row.team,
       row.title,
       row.track,
@@ -176,10 +169,9 @@ export function approvedCsv(
       row.leader,
       row.email,
       row.phone,
-      row.reviewedByEmail || "Unavailable (reviewer not recorded or account removed)",
-      row.links.map((link) => `${link.label}: ${link.url}`).join("; "),
-      row.submittedAt,
+      row.reviewedByEmail || "Unavailable (reviewer not recorded)",
       row.reviewedAt ?? "",
+      row.reversalReason ? "REVERSED" : "INITIAL",
       row.status,
       row.previousStatus ?? "",
       row.reversalReason ?? "",

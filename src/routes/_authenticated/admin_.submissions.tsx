@@ -80,7 +80,7 @@ function SubmissionsPage() {
       const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
       const link = document.createElement("a");
       link.href = url;
-      link.download = `vertex-${scope === "reversals" ? "reconsidered" : scope}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.download = `vertex-${scope === "reversals" ? "reconsidered" : scope}-${new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" })}.csv`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
@@ -154,8 +154,7 @@ function SubmissionsPage() {
                 Export rejected (CSV)
               </button>
               <p className="max-w-xs text-xs text-muted-foreground">
-                Reversed decisions are marked REVERSED DECISION, with the previous decision and
-                reason.
+                Reversed decisions are marked REVERSED, with the previous decision and reason.
               </p>
             </div>
           </div>
