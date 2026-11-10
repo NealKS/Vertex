@@ -88,7 +88,13 @@ await db.exec("SET ROLE anon;");
 assert.equal((await db.query("select * from event_announcements")).rows.length, 1);
 await assert.rejects(() => db.query("select * from hackathon_review_emails"), /permission denied/);
 await db.exec("SET ROLE service_role;");
+await assert.rejects(() => review("approved", outsider), /Admins only/);
 assert.equal((await review()).rows[0].ok, true);
+assert.equal(
+  (await db.query("select reviewed_by from event_registrations where id=$1", [id])).rows[0]
+    .reviewed_by,
+  "neal.kottilingal.in@gmail.com",
+);
 assert.equal((await review()).rows[0].ok, false);
 const claims = await Promise.all([
   db.query("select * from claim_sarvam_review_email($1)", [id]),

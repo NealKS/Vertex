@@ -393,6 +393,7 @@ export type Database = {
           reconsidering: boolean;
           reversal_reason: string | null;
           previous_status: string | null;
+          reviewed_by_user_id: string | null;
           review_note: string | null;
           email_sent_at: string | null;
           code: string;
@@ -417,6 +418,7 @@ export type Database = {
           reconsidering?: boolean;
           reversal_reason?: string | null;
           previous_status?: string | null;
+          reviewed_by_user_id?: string | null;
           review_note?: string | null;
           email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";
@@ -441,6 +443,7 @@ export type Database = {
           reconsidering?: boolean;
           reversal_reason?: string | null;
           previous_status?: string | null;
+          reviewed_by_user_id?: string | null;
           review_note?: string | null;
           email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";

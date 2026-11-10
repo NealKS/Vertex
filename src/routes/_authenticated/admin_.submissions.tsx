@@ -21,7 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import type { Submission } from "@/lib/hackathon-admin";
 
@@ -51,34 +50,17 @@ function SubmissionsPage() {
   const [status, setStatus] = useState("all");
   const [track, setTrack] = useState("all");
   const [search, setSearch] = useState("");
-  const [decision, setDecision] = useState<{
-    row: Submission;
-    status: "approved" | "rejected";
-    reconsider?: boolean;
-  } | null>(null);
   const [section, setSection] = useState<"submissions" | "reconsideration">("submissions");
-  const [note, setNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const notify = (result: { emailSent: boolean; emailMessage: string }) =>
     result.emailSent ? toast.success(result.emailMessage) : toast.warning(result.emailMessage);
-  const confirm = async () => {
-    if (!decision || busy) return;
-    setBusy(decision.row.id);
+  const decide = async (row: Submission, status: "approved" | "rejected") => {
+    if (busy) return;
+    setBusy(row.id);
     try {
-      const result = await review({
-        data: {
-          id: decision.row.id,
-          status: decision.status,
-          note,
-          reconsider: decision.reconsider,
-        },
-      });
-      notify(result);
-      setDecision(null);
-
-      setNote("");
+      notify(await review({ data: { id: row.id, status, reconsider: row.reconsidering } }));
       await refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Review failed.");
@@ -306,20 +288,14 @@ function SubmissionsPage() {
                           row.members.length !== 4 ||
                           (row.reconsidering && row.status === "approved")
                         }
-                        onClick={() => {
-                          setNote("");
-                          setDecision({ row, status: "approved", reconsider: row.reconsidering });
-                        }}
+                        onClick={() => void decide(row, "approved")}
                         className="btn-primary rounded-full px-5 py-2 text-xs disabled:opacity-40"
                       >
                         Approve
                       </button>
                       <button
                         disabled={!!busy || (row.reconsidering && row.status === "rejected")}
-                        onClick={() => {
-                          setNote("");
-                          setDecision({ row, status: "rejected", reconsider: row.reconsidering });
-                        }}
+                        onClick={() => void decide(row, "rejected")}
                         className="btn-ghost rounded-full px-5 py-2 text-xs disabled:opacity-40"
                       >
                         Reject
@@ -362,7 +338,7 @@ function SubmissionsPage() {
                           }
                         }}
                       >
-                        {busy === row.id ? "Processing…" : "Retry leader email"}
+                        {busy === row.id ? "Processing…" : "Resend email"}
                       </button>
                     )}
                 </div>
@@ -406,58 +382,6 @@ function SubmissionsPage() {
             </DialogDescription>
           </DialogHeader>
           {detailsRow && <SubmissionDetails row={detailsRow} />}
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={!!decision && !!data}
-        onOpenChange={(open) => {
-          if (!open && !busy) setDecision(null);
-        }}
-      >
-        <DialogContent className="rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl">
-              {decision?.reconsider
-                ? `Change decision from ${decision.row.status} to ${decision.status}?`
-                : `${decision?.status === "approved" ? "Approve" : "Reject"} this submission?`}
-            </DialogTitle>
-            <DialogDescription>
-              {decision?.row.title} · {decision?.row.team}.{" "}
-              {decision?.reconsider
-                ? "This replaces the current decision and emails the team leader."
-                : "This saves the decision and emails the team leader."}
-            </DialogDescription>
-          </DialogHeader>
-          {(decision?.status === "rejected" || decision?.reconsider) && (
-            <label className="text-sm">
-              {decision?.reconsider
-                ? "Reason for reversing decision (required)"
-                : "Rejection reason (optional)"}
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                maxLength={2000}
-                rows={4}
-                className="mt-2 w-full rounded-xl border border-hairline bg-background p-3"
-              />
-            </label>
-          )}
-          <DialogFooter>
-            <button
-              disabled={!!busy}
-              onClick={() => setDecision(null)}
-              className="btn-ghost rounded-full px-5 py-2"
-            >
-              Cancel
-            </button>
-            <button
-              disabled={!!busy || (!!decision?.reconsider && !note.trim())}
-              onClick={() => void confirm()}
-              className="btn-primary rounded-full px-5 py-2 disabled:opacity-50"
-            >
-              {busy ? "Processing…" : "Confirm decision"}
-            </button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </HackathonAdminShell>

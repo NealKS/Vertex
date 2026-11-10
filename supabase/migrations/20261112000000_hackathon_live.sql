@@ -18,8 +18,31 @@ REVOKE ALL ON FUNCTION public.is_hackathon_admin() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_hackathon_admin() TO anon, authenticated, service_role;
 
 ALTER TABLE public.event_registrations
- ADD COLUMN IF NOT EXISTS reviewed_by uuid,
+ ADD COLUMN IF NOT EXISTS reviewed_by text,
+ ADD COLUMN IF NOT EXISTS reviewed_by_user_id uuid,
  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+-- Keep the UUID separately; reviewed_by snapshots the deciding admin's email.
+DO $$ DECLARE fk record; BEGIN
+ FOR fk IN SELECT conname FROM pg_constraint WHERE conrelid='public.event_registrations'::regclass AND contype='f'
+ AND (SELECT attnum FROM pg_attribute WHERE attrelid='public.event_registrations'::regclass AND attname='reviewed_by') = ANY(conkey)
+ LOOP EXECUTE format('ALTER TABLE public.event_registrations DROP CONSTRAINT %I',fk.conname); END LOOP;
+END $$;
+ALTER TABLE public.event_registrations ALTER COLUMN reviewed_by TYPE text USING reviewed_by::text;
+UPDATE public.event_registrations r SET reviewed_by_user_id=u.id, reviewed_by=lower(btrim(u.email))
+ FROM auth.users u WHERE r.reviewed_by=u.id::text;
+CREATE OR REPLACE FUNCTION public.hackathon_reviewer_email(p_user_id uuid) RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+DECLARE result text;
+BEGIN
+ SELECT lower(btrim(u.email)) INTO result FROM auth.users u JOIN public.admin_emails a ON a.email=lower(btrim(u.email))
+ WHERE u.id=p_user_id AND u.email_confirmed_at IS NOT NULL;
+ IF result IS NULL THEN RAISE EXCEPTION 'Admins only'; END IF;
+ RETURN result;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.hackathon_reviewer_email(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.hackathon_reviewer_email(uuid) TO service_role;
+
 CREATE TABLE IF NOT EXISTS public.event_announcements (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id uuid NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
  title text NOT NULL, body text NOT NULL, pinned boolean NOT NULL DEFAULT false,
@@ -90,9 +113,11 @@ CREATE OR REPLACE FUNCTION public.review_sarvam_submission(
   p_id uuid, p_status text, p_reviewer uuid, p_note text, p_payload jsonb
 ) RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 DECLARE changed_id uuid;
+DECLARE reviewer_email text;
 BEGIN
+  reviewer_email := public.hackathon_reviewer_email(p_reviewer);
   IF p_status NOT IN ('approved', 'rejected') THEN RAISE EXCEPTION 'Invalid decision'; END IF;
-  UPDATE public.event_registrations SET status = p_status, reviewed_by = p_reviewer,
+  UPDATE public.event_registrations SET status = p_status, reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
     reviewed_at = now(), review_note = nullif(p_note, '')
   WHERE id = p_id AND status = 'pending'
     AND event_id IN (SELECT id FROM public.events WHERE slug = 'build-with-sarvam')
@@ -162,7 +187,9 @@ CREATE OR REPLACE FUNCTION public.reconsider_sarvam_submission(
 ) RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 DECLARE previous public.event_registrations%ROWTYPE;
 DECLARE old_email public.hackathon_review_emails%ROWTYPE;
+DECLARE reviewer_email text;
 BEGIN
+  reviewer_email := public.hackathon_reviewer_email(p_reviewer);
   IF p_status IS DISTINCT FROM 'approved' OR coalesce(length(trim(p_note)), 0) = 0
     OR length(p_note) > 2000 THEN RAISE EXCEPTION 'Approval and reconsideration reason required'; END IF;
   SELECT * INTO previous FROM public.event_registrations
@@ -176,10 +203,10 @@ BEGIN
   IF old_email.sent_at IS NULL AND old_email.claimed_at >= now() - interval '60 seconds'
     THEN RAISE EXCEPTION 'Previous email is processing; retry after one minute'; END IF;
   INSERT INTO public.hackathon_review_history(registration_id, previous_review, previous_email, changed_by, reason)
-    VALUES (p_id, jsonb_build_object('status', previous.status, 'reviewed_by', previous.reviewed_by,
+    VALUES (p_id, jsonb_build_object('status', previous.status, 'reviewed_by', previous.reviewed_by, 'reviewed_by_user_id', previous.reviewed_by_user_id,
       'reviewed_at', previous.reviewed_at, 'review_note', previous.review_note, 'email_sent_at', previous.email_sent_at),
       CASE WHEN old_email.id IS NOT NULL THEN to_jsonb(old_email) ELSE NULL END, p_reviewer, trim(p_note));
-  UPDATE public.event_registrations SET status = 'approved', reviewed_by = p_reviewer,
+  UPDATE public.event_registrations SET status = 'approved', reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
     reviewed_at = now(), review_note = trim(p_note), email_sent_at = NULL WHERE id = p_id;
   DELETE FROM public.hackathon_review_emails WHERE registration_id = p_id;
   -- A new ID gives the approval its own provider idempotency key.
@@ -221,7 +248,9 @@ CREATE OR REPLACE FUNCTION public.reconsider_sarvam_submission(
 ) RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
 DECLARE previous public.event_registrations%ROWTYPE;
 DECLARE old_email public.hackathon_review_emails%ROWTYPE;
+DECLARE reviewer_email text;
 BEGIN
+  reviewer_email := public.hackathon_reviewer_email(p_reviewer);
   IF (p_status IS NULL OR p_status NOT IN ('approved', 'rejected')) OR coalesce(length(trim(p_note)), 0) = 0
     OR length(p_note) > 2000 THEN RAISE EXCEPTION 'New decision and reconsideration reason required'; END IF;
   SELECT * INTO previous FROM public.event_registrations
@@ -235,10 +264,10 @@ BEGIN
   IF old_email.sent_at IS NULL AND old_email.claimed_at >= now() - interval '60 seconds'
     THEN RAISE EXCEPTION 'Previous email is processing; retry after one minute'; END IF;
   INSERT INTO public.hackathon_review_history(registration_id, previous_review, previous_email, changed_by, reason)
-    VALUES (p_id, jsonb_build_object('status', previous.status, 'reviewed_by', previous.reviewed_by,
+    VALUES (p_id, jsonb_build_object('status', previous.status, 'reviewed_by', previous.reviewed_by, 'reviewed_by_user_id', previous.reviewed_by_user_id,
       'reviewed_at', previous.reviewed_at, 'review_note', previous.review_note, 'email_sent_at', previous.email_sent_at),
       CASE WHEN old_email.id IS NOT NULL THEN to_jsonb(old_email) ELSE NULL END, p_reviewer, trim(p_note));
-  UPDATE public.event_registrations SET status = p_status, reconsidering = false, previous_status = previous.status, reversal_reason = trim(p_note), reviewed_by = p_reviewer,
+  UPDATE public.event_registrations SET status = p_status, reconsidering = false, previous_status = previous.status, reversal_reason = trim(p_note), reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
     reviewed_at = now(), review_note = trim(p_note), email_sent_at = NULL WHERE id = p_id;
   DELETE FROM public.hackathon_review_emails WHERE registration_id = p_id;
   -- A new ID gives the approval its own provider idempotency key.

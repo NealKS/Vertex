@@ -36,7 +36,7 @@ export async function allSubmissions(includeReviewerEmails = false) {
     const { data, error } = await supabaseAdmin
       .from("event_registrations")
       .select(
-        "reconsidering,reversal_reason,previous_status,id,event_id,name,email,phone,usn,code,created_at,status,form_data,reviewed_at,reviewed_by,review_note,email_sent_at,checked_in_at,checked_in_by,pass_sent_at,pass_sent_to,workspace_registration",
+        "reviewed_by_user_id,reconsidering,reversal_reason,previous_status,id,event_id,name,email,phone,usn,code,created_at,status,form_data,reviewed_at,reviewed_by,review_note,email_sent_at,checked_in_at,checked_in_by,pass_sent_at,pass_sent_to,workspace_registration",
       )
       .eq("event_id", eventId)
       .order("created_at", { ascending: false })
@@ -47,20 +47,9 @@ export async function allSubmissions(includeReviewerEmails = false) {
     rows.push(...data.map(submissionFromRow));
     if (data.length < 500) break;
   }
-  if (includeReviewerEmails) {
-    const emails = new Map<string, string>();
-    // One lookup per recorded reviewer, only for authenticated CSV exports.
-    for (const id of new Set(
-      rows.map((row) => row.reviewedBy).filter((id): id is string => Boolean(id)),
-    )) {
-      const { data, error } = await supabaseAdmin.auth.admin.getUserById(id);
-      if (error && error.status !== 404)
-        throw new Error("Could not verify reviewer emails. Please retry the export.");
-      if (data.user?.email) emails.set(id, data.user.email);
-    }
+  if (includeReviewerEmails)
     for (const row of rows)
-      row.reviewedByEmail = row.reviewedBy ? (emails.get(row.reviewedBy) ?? null) : null;
-  }
+      row.reviewedByEmail = row.reviewedBy?.includes("@") ? row.reviewedBy : null;
   return { eventId, rows };
 }
 const payloadSchema = z.object({
@@ -136,7 +125,7 @@ export async function reviewSubmission(
     .eq("event_id", eventId)
     .single();
   if (error || !data) fail(404, "Submission not found.");
-  if (input.reconsider && !input.note.trim()) fail(400, "Reversing a decision requires a reason.");
+
   if (
     input.reconsider
       ? !data.reconsidering ||
@@ -146,6 +135,9 @@ export async function reviewSubmission(
   )
     fail(409, "This submission has already been reviewed. Refresh the list.");
   const row = submissionFromRow(data);
+  const note =
+    input.note.trim() ||
+    (input.reconsider ? `Decision reversed from ${data.status} to ${input.status}.` : "");
   if (input.status === "approved" && row.members.length !== 4)
     fail(400, "Approval requires exactly 4 team members.");
   const from = process.env.FROM_EMAIL || process.env.EVENTS_FROM_EMAIL;
@@ -154,7 +146,7 @@ export async function reviewSubmission(
   const content = renderHackathonEmail({
     ...row,
     status: input.status,
-    note: input.note,
+    note,
     reconsider: input.reconsider,
   });
   const payload = {
@@ -169,7 +161,7 @@ export async function reviewSubmission(
       p_id: input.id,
       p_status: input.status,
       p_reviewer: context.userId,
-      p_note: input.note,
+      p_note,
       p_payload: payload,
     },
   );
@@ -178,5 +170,12 @@ export async function reviewSubmission(
   if (result.error)
     throw new Error("Could not save this review. Check the Sarvam admin migrations.");
   if (!result.data) fail(409, "Another reviewer has already processed this submission.");
-  return { ok: true, ...(await deliverReviewEmail(input.id)) };
+  const delivery = await deliverReviewEmail(input.id);
+  return {
+    ok: true,
+    ...delivery,
+    emailMessage: delivery.emailSent
+      ? `${input.status === "approved" ? "Approved" : "Rejected"} · email sent to ${row.email}`
+      : delivery.emailMessage,
+  };
 }
