@@ -140,9 +140,8 @@ export async function reviewSubmission(
     (input.reconsider ? `Decision reversed from ${data.status} to ${input.status}.` : "");
   if (input.status === "approved" && row.members.length !== 4)
     fail(400, "Approval requires exactly 4 team members.");
-  const from = process.env.FROM_EMAIL || process.env.EVENTS_FROM_EMAIL;
-  if (!process.env.RESEND_API_KEY || !from)
-    fail(503, "Set RESEND_API_KEY and FROM_EMAIL before reviewing submissions.");
+  const from = process.env.FROM_EMAIL || "Vertex Club <events@abscissa.dev>";
+  if (!process.env.RESEND_API_KEY) fail(503, "Set RESEND_API_KEY before reviewing submissions.");
   const content = renderHackathonEmail({
     ...row,
     status: input.status,
@@ -153,7 +152,7 @@ export async function reviewSubmission(
     from,
     to: [row.email],
     ...content,
-    ...(process.env.EVENTS_REPLY_TO ? { reply_to: process.env.EVENTS_REPLY_TO } : {}),
+    reply_to: process.env.EVENTS_REPLY_TO || "events@abscissa.dev",
   };
   const result = await supabaseAdmin.rpc(
     input.reconsider ? "reconsider_sarvam_submission" : "review_sarvam_submission",

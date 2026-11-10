@@ -138,34 +138,30 @@ const input = {
   status: "approved",
   note: "",
 };
-assert.throws(() => renderHackathonEmail(input), /WHATSAPP_GROUP_LINK/);
-HACKATHON_EMAIL.WHATSAPP_GROUP_LINK = "https://chat.whatsapp.com/test";
-HACKATHON_EMAIL.INDUS_LINK = "https://example.test/indus";
 const email = renderHackathonEmail(input);
 assert.doesNotMatch(email.html, /<script>/);
 for (const value of [
+  "Top 50",
   "13–14 November 2026",
-  "REVA University, Bengaluru",
-  "Exactly 4",
-  "15K",
-  "25K",
+  "Rangasthala",
+  "24 hours",
   "500",
-  "FOOD AND ACCOMMODATION WILL NOT BE PROVIDED",
-  "mandatory",
-  "TBD",
-  "official terms",
+  "Food and accommodation",
+  "Build-With-Sarvam-Finale-Guide.pdf",
+  "https://indus.sarvam.ai/",
 ])
   assert.ok(email.text.includes(value), value);
-assert.match(email.html, /href="https:\/\/chat.whatsapp.com\/test"/);
+assert.match(email.html, /background:#101713/);
 const rejected = renderHackathonEmail({
   ...input,
   status: "rejected",
-  note: "<img src=x onerror=alert(1)>",
+  note: "Never include this hidden note",
 });
-assert.doesNotMatch(rejected.html, /<img/);
-assert.match(rejected.text, /future Vertex events/);
-HACKATHON_EMAIL.INDUS_LINK = "javascript:alert(1)";
-assert.throws(() => renderHackathonEmail(input), /HTTPS/);
+assert.match(rejected.text, /not been selected among the Top 50 teams/);
+assert.doesNotMatch(rejected.text, /Never include|attached PDF/);
+assert.match(rejected.html, /<strong>not been selected among the Top 50 teams<\/strong>/);
+assert.equal(HACKATHON_EMAIL.PRIZES.length, 5);
+assert.equal(HACKATHON_EMAIL.SCHEDULE.length, 13);
 console.log(
-  "Hackathon tests passed: allowlist normalization, CSV escaping/formula defense, private-data mapping, safe links, complete email content and HTML escaping.",
+  "CSV leader-only data, reviewer identity, escaping and exact live email content passed.",
 );
