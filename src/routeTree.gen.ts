@@ -29,6 +29,9 @@ import { Route as EventsHackathonWorkspaceRouteImport } from './routes/events.ha
 import { Route as EventsNeuralNetworksFromScratchRouteImport } from './routes/events.neural-networks-from-scratch'
 import { Route as EventsSihInternalHackathonRouteRouteImport } from './routes/events.sih-internal-hackathon.route'
 import { Route as MemberSlugRouteImport } from './routes/member.$slug'
+import { Route as AuthenticatedAdminAnnouncementsRouteImport } from './routes/_authenticated/admin_.announcements'
+import { Route as AuthenticatedAdminSubmissionsRouteImport } from './routes/_authenticated/admin_.submissions'
+import { Route as AuthenticatedAdminTeamsRouteImport } from './routes/_authenticated/admin_.teams'
 import { Route as EventsSihInternalHackathonIndexRouteImport } from './routes/events.sih-internal-hackathon.index'
 import { Route as EventsSihInternalHackathonJoinRouteImport } from './routes/events.sih-internal-hackathon.join'
 import { Route as EventsSihInternalHackathonResultsRouteImport } from './routes/events.sih-internal-hackathon.results'
@@ -138,6 +141,23 @@ const MemberSlugRoute = MemberSlugRouteImport.update({
   path: '/member/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAdminAnnouncementsRoute =
+  AuthenticatedAdminAnnouncementsRouteImport.update({
+    id: '/admin_/announcements',
+    path: '/admin/announcements',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminSubmissionsRoute =
+  AuthenticatedAdminSubmissionsRouteImport.update({
+    id: '/admin_/submissions',
+    path: '/admin/submissions',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedAdminTeamsRoute = AuthenticatedAdminTeamsRouteImport.update({
+  id: '/admin_/teams',
+  path: '/admin/teams',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const EventsSihInternalHackathonIndexRoute =
   EventsSihInternalHackathonIndexRouteImport.update({
     id: '/',
@@ -194,6 +214,9 @@ export interface FileRoutesByFullPath {
   '/events/neural-networks-from-scratch': typeof EventsNeuralNetworksFromScratchRoute
   '/member/$slug': typeof MemberSlugRoute
   '/events/': typeof EventsIndexRoute
+  '/admin/announcements': typeof AuthenticatedAdminAnnouncementsRoute
+  '/admin/submissions': typeof AuthenticatedAdminSubmissionsRoute
+  '/admin/teams': typeof AuthenticatedAdminTeamsRoute
   '/events/sih-internal-hackathon/join': typeof EventsSihInternalHackathonJoinRoute
   '/events/sih-internal-hackathon/results': typeof EventsSihInternalHackathonResultsRoute
   '/events/sih-internal-hackathon/team': typeof EventsSihInternalHackathonTeamRoute
@@ -219,6 +242,9 @@ export interface FileRoutesByTo {
   '/events/neural-networks-from-scratch': typeof EventsNeuralNetworksFromScratchRoute
   '/member/$slug': typeof MemberSlugRoute
   '/events': typeof EventsIndexRoute
+  '/admin/announcements': typeof AuthenticatedAdminAnnouncementsRoute
+  '/admin/submissions': typeof AuthenticatedAdminSubmissionsRoute
+  '/admin/teams': typeof AuthenticatedAdminTeamsRoute
   '/events/sih-internal-hackathon/join': typeof EventsSihInternalHackathonJoinRoute
   '/events/sih-internal-hackathon/results': typeof EventsSihInternalHackathonResultsRoute
   '/events/sih-internal-hackathon/team': typeof EventsSihInternalHackathonTeamRoute
@@ -248,6 +274,9 @@ export interface FileRoutesById {
   '/events/neural-networks-from-scratch': typeof EventsNeuralNetworksFromScratchRoute
   '/member/$slug': typeof MemberSlugRoute
   '/events/': typeof EventsIndexRoute
+  '/_authenticated/admin_/announcements': typeof AuthenticatedAdminAnnouncementsRoute
+  '/_authenticated/admin_/submissions': typeof AuthenticatedAdminSubmissionsRoute
+  '/_authenticated/admin_/teams': typeof AuthenticatedAdminTeamsRoute
   '/events/sih-internal-hackathon/join': typeof EventsSihInternalHackathonJoinRoute
   '/events/sih-internal-hackathon/results': typeof EventsSihInternalHackathonResultsRoute
   '/events/sih-internal-hackathon/team': typeof EventsSihInternalHackathonTeamRoute
@@ -277,6 +306,9 @@ export interface FileRouteTypes {
     | '/events/neural-networks-from-scratch'
     | '/member/$slug'
     | '/events/'
+    | '/admin/announcements'
+    | '/admin/submissions'
+    | '/admin/teams'
     | '/events/sih-internal-hackathon/join'
     | '/events/sih-internal-hackathon/results'
     | '/events/sih-internal-hackathon/team'
@@ -302,6 +334,9 @@ export interface FileRouteTypes {
     | '/events/neural-networks-from-scratch'
     | '/member/$slug'
     | '/events'
+    | '/admin/announcements'
+    | '/admin/submissions'
+    | '/admin/teams'
     | '/events/sih-internal-hackathon/join'
     | '/events/sih-internal-hackathon/results'
     | '/events/sih-internal-hackathon/team'
@@ -330,6 +365,9 @@ export interface FileRouteTypes {
     | '/events/neural-networks-from-scratch'
     | '/member/$slug'
     | '/events/'
+    | '/_authenticated/admin_/announcements'
+    | '/_authenticated/admin_/submissions'
+    | '/_authenticated/admin_/teams'
     | '/events/sih-internal-hackathon/join'
     | '/events/sih-internal-hackathon/results'
     | '/events/sih-internal-hackathon/team'
@@ -497,6 +535,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MemberSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/admin_/announcements': {
+      id: '/_authenticated/admin_/announcements'
+      path: '/admin/announcements'
+      fullPath: '/admin/announcements'
+      preLoaderRoute: typeof AuthenticatedAdminAnnouncementsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin_/submissions': {
+      id: '/_authenticated/admin_/submissions'
+      path: '/admin/submissions'
+      fullPath: '/admin/submissions'
+      preLoaderRoute: typeof AuthenticatedAdminSubmissionsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/admin_/teams': {
+      id: '/_authenticated/admin_/teams'
+      path: '/admin/teams'
+      fullPath: '/admin/teams'
+      preLoaderRoute: typeof AuthenticatedAdminTeamsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/events/sih-internal-hackathon/': {
       id: '/events/sih-internal-hackathon/'
       path: '/'
@@ -545,11 +604,17 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
   AuthenticatedMeRoute: typeof AuthenticatedMeRoute
+  AuthenticatedAdminAnnouncementsRoute: typeof AuthenticatedAdminAnnouncementsRoute
+  AuthenticatedAdminSubmissionsRoute: typeof AuthenticatedAdminSubmissionsRoute
+  AuthenticatedAdminTeamsRoute: typeof AuthenticatedAdminTeamsRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAdminRoute: AuthenticatedAdminRoute,
   AuthenticatedMeRoute: AuthenticatedMeRoute,
+  AuthenticatedAdminAnnouncementsRoute: AuthenticatedAdminAnnouncementsRoute,
+  AuthenticatedAdminSubmissionsRoute: AuthenticatedAdminSubmissionsRoute,
+  AuthenticatedAdminTeamsRoute: AuthenticatedAdminTeamsRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =

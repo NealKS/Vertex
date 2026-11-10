@@ -19,9 +19,11 @@ export const getViewer = createServerFn({ method: "GET" })
 export const adminOverview = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const { loadViewer } = await import("@/lib/roles.server");
-    const viewer = await loadViewer(context.supabase, context.userId);
-    const sb = context.supabase;
+    const { requireHackathonAccess } = await import("@/lib/hackathon-admin.server");
+    const viewer = await requireHackathonAccess(context);
+    const sb = viewer.isAllowlisted
+      ? (await import("@/integrations/supabase/client.server")).supabaseAdmin
+      : context.supabase;
 
     if (!viewer.isAdmin && !viewer.isHead && !viewer.isJudge) {
       const { data: user } = await sb.auth.getUser();
@@ -453,18 +455,16 @@ export const saveEventStaffAccess = createServerFn({ method: "POST" })
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
-      .from("event_staff_access")
-      .upsert(
-        {
-          event_id: data.eventId,
-          email: data.email.toLowerCase(),
-          permission: data.permission,
-          active: true,
-          created_by: context.userId,
-        },
-        { onConflict: "event_id,email" },
-      );
+    const { error } = await supabaseAdmin.from("event_staff_access").upsert(
+      {
+        event_id: data.eventId,
+        email: data.email.toLowerCase(),
+        permission: data.permission,
+        active: true,
+        created_by: context.userId,
+      },
+      { onConflict: "event_id,email" },
+    );
     if (error) throw new Error("Could not save event access.");
     return { ok: true };
   });
@@ -497,19 +497,27 @@ export const setEventRegistrationStatus = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { assertAdmin } = await import("@/lib/roles.server");
     await assertAdmin(context.supabase, context.userId);
-    const { data: registration, error: lookupError } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: registration, error: lookupError } = await supabaseAdmin
       .from("event_registrations")
       .select("id, event_id, name, email, status, form_data")
       .eq("id", data.id)
       .single();
     if (lookupError || !registration) throw new Error("Could not find that registration.");
 
-    const { data: event, error: eventError } = await context.supabase
+    const { data: event, error: eventError } = await supabaseAdmin
       .from("events")
       .select("slug")
       .eq("id", registration.event_id)
       .maybeSingle();
     if (eventError) throw new Error("Could not identify that registration's event.");
+
+    if (event?.slug === "build-with-sarvam") {
+      const { reviewSubmission, fail } = await import("./hackathon-admin.server");
+      if (data.status === "waitlisted")
+        return fail(400, "Sarvam submissions can only be approved or rejected.");
+      return reviewSubmission(context, { id: data.id, status: data.status, note: "" });
+    }
 
     const { error } = await context.supabase
       .from("event_registrations")
@@ -521,27 +529,7 @@ export const setEventRegistrationStatus = createServerFn({ method: "POST" })
       .eq("id", data.id);
     if (error) throw new Error("Could not update that registration.");
 
-    const shouldSendSarvamApproval =
-      event?.slug === "build-with-sarvam" &&
-      data.status === "approved" &&
-      registration.status !== "approved";
-    if (!shouldSendSarvamApproval) return { ok: true, emailSent: false };
-
-    const formData =
-      registration.form_data && typeof registration.form_data === "object"
-        ? (registration.form_data as Record<string, unknown>)
-        : {};
-    const teamName = typeof formData.team_name === "string" ? formData.team_name : "your team";
-    const memberCount = typeof formData.member_count === "number" ? formData.member_count : 2;
-    const { sendSarvamApprovalEmail } = await import("@/lib/sarvam-email.server");
-    const emailSent = await sendSarvamApprovalEmail({
-      registrationId: registration.id,
-      teamName,
-      teamLeadName: registration.name,
-      teamLeadEmail: registration.email,
-      memberCount,
-    });
-    return { ok: true, emailSent };
+    return { ok: true, emailSent: false };
   });
 
 export const awardBadge = createServerFn({ method: "POST" })

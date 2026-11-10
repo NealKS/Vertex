@@ -5,21 +5,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 
 export const Route = createFileRoute("/auth")({
-  head: () => ({
-    meta: [
-      { title: "Sign in — Vertex" },
-      {
-        name: "description",
-        content:
-          "Vertex members sign in to manage their profile, applications, and event check-ins.",
-      },
-      { property: "og:title", content: "Sign in — Vertex" },
-      { property: "og:description", content: "Member access for the Vertex technical club." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
-      { name: "robots", content: "noindex" },
-    ],
-  }),
   component: AuthPage,
 });
 

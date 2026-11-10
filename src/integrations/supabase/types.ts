@@ -8,6 +8,28 @@ export type Database = {
   };
   public: {
     Tables: {
+      hackathon_review_emails: {
+        Row: {
+          id: string;
+          registration_id: string;
+          payload: Json;
+          first_attempt_at: string | null;
+          claimed_at: string | null;
+          sent_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id: string;
+          payload: Json;
+          first_attempt_at?: string | null;
+          claimed_at?: string | null;
+          sent_at?: string | null;
+          created_at?: string;
+        };
+        Update: { claimed_at?: string | null; sent_at?: string | null };
+        Relationships: [];
+      };
       achievements: {
         Row: {
           created_at: string;
@@ -368,6 +390,11 @@ export type Database = {
       };
       event_registrations: {
         Row: {
+          reconsidering: boolean;
+          reversal_reason: string | null;
+          previous_status: string | null;
+          review_note: string | null;
+          email_sent_at: string | null;
           code: string;
           status: "pending" | "approved" | "rejected" | "waitlisted";
           form_data: Json;
@@ -387,6 +414,11 @@ export type Database = {
           usn: string | null;
         };
         Insert: {
+          reconsidering?: boolean;
+          reversal_reason?: string | null;
+          previous_status?: string | null;
+          review_note?: string | null;
+          email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";
           form_data?: Json;
           reviewed_at?: string | null;
@@ -406,6 +438,11 @@ export type Database = {
           usn?: string | null;
         };
         Update: {
+          reconsidering?: boolean;
+          reversal_reason?: string | null;
+          previous_status?: string | null;
+          review_note?: string | null;
+          email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";
           form_data?: Json;
           reviewed_at?: string | null;
@@ -1427,6 +1464,39 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      is_hackathon_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
+      queue_sarvam_reconsideration: {
+        Args: { p_id: string; p_queued: boolean };
+        Returns: boolean;
+      };
+      reconsider_sarvam_submission: {
+        Args: {
+          p_id: string;
+          p_status: string;
+          p_reviewer: string;
+          p_note: string;
+          p_payload: Json;
+        };
+        Returns: boolean;
+      };
+      review_sarvam_submission: {
+        Args: {
+          p_id: string;
+          p_status: string;
+          p_reviewer: string;
+          p_note: string;
+          p_payload: Json;
+        };
+        Returns: boolean;
+      };
+      claim_sarvam_review_email: {
+        Args: { p_id: string };
+        Returns: Database["public"]["Tables"]["hackathon_review_emails"]["Row"][];
+      };
+      complete_sarvam_review_email: {
+        Args: { p_id: string; p_claimed_at: string };
+        Returns: undefined;
+      };
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"];

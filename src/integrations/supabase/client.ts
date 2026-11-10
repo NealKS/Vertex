@@ -38,13 +38,13 @@ export function isSupabaseClientConfigured(): boolean {
     (typeof process !== "undefined" ? process.env?.["SUPABASE_PUBLISHABLE_KEY"] : undefined);
   return Boolean(
     url &&
-      key &&
-      typeof url === "string" &&
-      typeof key === "string" &&
-      key.trim().length > 0 &&
-      !url.includes("<project-ref>") &&
-      !url.includes("placeholder") &&
-      url.startsWith("https://"),
+    key &&
+    typeof url === "string" &&
+    typeof key === "string" &&
+    key.trim().length > 0 &&
+    !url.includes("<project-ref>") &&
+    !url.includes("placeholder") &&
+    url.startsWith("https://"),
   );
 }
 
@@ -96,13 +96,13 @@ function createStubClient() {
       signInWithPassword: async () => ({
         data: { user: null, session: null },
         error: new Error(
-          "Supabase is not configured yet. Set VITE_SUPABASE_PUBLISHABLE_KEY in .env.",
+          "Supabase is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.",
         ),
       }),
       signUp: async () => ({
         data: { user: null, session: null },
         error: new Error(
-          "Supabase is not configured yet. Set VITE_SUPABASE_PUBLISHABLE_KEY in .env.",
+          "Supabase is not configured yet. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.",
         ),
       }),
       signOut: async () => ({ error: null }),

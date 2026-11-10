@@ -1,3 +1,4 @@
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Link } from "@tanstack/react-router";
 import { AnimatePresence, motion, useScroll } from "motion/react";
 import { Instagram, Linkedin, Menu, X } from "lucide-react";
@@ -11,7 +12,7 @@ function AdminLink({ mobile = false, onNavigate }: { mobile?: boolean; onNavigat
       onClick={onNavigate}
       className={
         mobile
-          ? "block w-full rounded-xl px-4 py-3 text-left hover:bg-black/[0.04]"
+          ? "block w-full rounded-xl px-4 py-3 text-left hover:bg-secondary"
           : "transition-colors hover:text-foreground"
       }
     >
@@ -50,7 +51,7 @@ export function SiteHeader() {
     { label: "Events", to: "/events" as const },
     { label: "Passes", to: "/passes" as const },
     { label: "Projects", to: "/projects" as const },
-    { label: "Feed", to: "/announcements" as const },
+    { label: "Announcements", to: "/announcements" as const },
   ];
 
   return (
@@ -63,7 +64,7 @@ export function SiteHeader() {
           <img
             src="/vertex-logo-transparent.png"
             alt="Vertex"
-            className="h-8 w-auto"
+            className="h-8 w-auto dark:brightness-0 dark:invert"
             width={80}
             height={32}
             decoding="async"
@@ -96,13 +97,16 @@ export function SiteHeader() {
             </Link>
           )}
         </nav>
-        <button
-          aria-label={open ? "Close menu" : "Open menu"}
-          onClick={() => setOpen(!open)}
-          className="glass-panel rounded-lg p-2 lg:hidden"
-        >
-          {open ? <X size={18} /> : <Menu size={18} />}
-        </button>
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <button
+            aria-label={open ? "Close menu" : "Open menu"}
+            onClick={() => setOpen(!open)}
+            className="glass-panel rounded-lg p-2 lg:hidden"
+          >
+            {open ? <X size={18} /> : <Menu size={18} />}
+          </button>
+        </div>
       </div>
       <AnimatePresence>
         {open && (
@@ -118,13 +122,13 @@ export function SiteHeader() {
                   key={item.label}
                   to={item.to}
                   onClick={() => setOpen(false)}
-                  className="rounded-xl px-4 py-3 hover:bg-black/[0.04]"
+                  className="rounded-xl px-4 py-3 hover:bg-secondary"
                 >
                   {item.label}
                 </Link>
               ))}
               <div
-                className="rounded-xl px-4 py-3 hover:bg-black/[0.04]"
+                className="rounded-xl px-4 py-3 hover:bg-secondary"
                 onClick={() => setOpen(false)}
               >
                 <AdminLink mobile onNavigate={() => setOpen(false)} />
@@ -170,7 +174,7 @@ export function SiteFooter() {
           <img
             src="/vertex-logo-transparent.png"
             alt="Vertex"
-            className="h-10 w-auto"
+            className="h-10 w-auto dark:brightness-0 dark:invert"
             width={120}
             height={40}
             decoding="async"

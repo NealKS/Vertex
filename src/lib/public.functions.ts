@@ -40,15 +40,14 @@ const SELECTED_INDEPENDENT_WORK = [
 ] as const;
 
 export const getAnnouncements = createServerFn({ method: "GET" }).handler(async () => {
-  const { isSupabasePublicConfigured, serverPublicClient } = await import(
-    "@/lib/supabase-public.server"
-  );
+  const { isSupabasePublicConfigured, serverPublicClient } =
+    await import("@/lib/supabase-public.server");
   if (!isSupabasePublicConfigured()) {
     return { items: [], teams: [] };
   }
   try {
     const sb = serverPublicClient();
-    const [feed, teams] = await Promise.all([
+    const [feed, teams, hackathon] = await Promise.all([
       sb
         .from("announcements")
         .select("id, title, body, team_id, pinned, media_url, media_type, created_at")
@@ -57,17 +56,41 @@ export const getAnnouncements = createServerFn({ method: "GET" }).handler(async 
         .order("created_at", { ascending: false })
         .limit(60),
       sb.from("teams").select("id, name").order("sort_order"),
+      sb
+        .from("event_announcements")
+        .select("id,title,body,pinned,created_at,events!inner(slug)")
+        .eq("published", true)
+        .eq("events.slug", "build-with-sarvam")
+        .order("pinned", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(60),
     ]);
-    return { items: feed.data ?? [], teams: teams.data ?? [] };
+    if (feed.error || teams.error || hackathon.error)
+      throw new Error("Could not load announcements.");
+    const items = [
+      ...(feed.data ?? []),
+      ...(hackathon.data ?? []).map((row) => ({
+        id: row.id,
+        title: row.title,
+        body: row.body,
+        pinned: row.pinned,
+        created_at: row.created_at,
+        team_id: "sarvam",
+        media_url: null,
+        media_type: null,
+      })),
+    ].sort(
+      (a, b) => Number(b.pinned) - Number(a.pinned) || b.created_at.localeCompare(a.created_at),
+    );
+    return { items, teams: [{ id: "sarvam", name: "Vertex × Sarvam AI" }, ...(teams.data ?? [])] };
   } catch {
-    return { items: [], teams: [] };
+    throw new Error("Could not load announcements. Please try again.");
   }
 });
 
 export const getShowcase = createServerFn({ method: "GET" }).handler(async () => {
-  const { isSupabasePublicConfigured, serverPublicClient } = await import(
-    "@/lib/supabase-public.server"
-  );
+  const { isSupabasePublicConfigured, serverPublicClient } =
+    await import("@/lib/supabase-public.server");
   if (!isSupabasePublicConfigured()) {
     return {
       projects: [...SELECTED_INDEPENDENT_WORK],
@@ -107,9 +130,8 @@ export const getShowcase = createServerFn({ method: "GET" }).handler(async () =>
 export const getMemberExtras = createServerFn({ method: "GET" })
   .validator((input: unknown) => z.object({ slug: z.string().min(1).max(80) }).parse(input))
   .handler(async ({ data }) => {
-    const { isSupabasePublicConfigured, serverPublicClient } = await import(
-      "@/lib/supabase-public.server"
-    );
+    const { isSupabasePublicConfigured, serverPublicClient } =
+      await import("@/lib/supabase-public.server");
     if (!isSupabasePublicConfigured()) {
       return { badges: [], achievements: [], projects: [] };
     }
@@ -168,9 +190,8 @@ export const getMemberExtras = createServerFn({ method: "GET" })
   });
 
 export const getMentorPool = createServerFn({ method: "GET" }).handler(async () => {
-  const { isSupabasePublicConfigured, serverPublicClient } = await import(
-    "@/lib/supabase-public.server"
-  );
+  const { isSupabasePublicConfigured, serverPublicClient } =
+    await import("@/lib/supabase-public.server");
   if (!isSupabasePublicConfigured()) {
     return { members: [], teams: [] };
   }

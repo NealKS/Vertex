@@ -63,7 +63,8 @@ export const registerForSarvamHackathon = createServerFn({ method: "POST" })
         email: lead.email.toLowerCase(),
         phone: lead.phone || null,
         usn: lead.usn || null,
-        status: operations.requires_approval ? "pending" : "approved",
+        // Every Sarvam idea requires an allowlisted reviewer, regardless of generic event settings.
+        status: "pending",
         pass_sent_to: lead.email.toLowerCase(),
         form_data: {
           team_name: data.teamName,

@@ -1,5 +1,6 @@
+import { HackathonAdminNav } from "@/components/admin/HackathonAdminShell";
 import { NEURAL_NETWORK_WORKSHOP as workshopEvent } from "@/data/neural-network-workshop";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter, redirect } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { AlertTriangle, CheckCircle2, RotateCcw, XCircle } from "lucide-react";
@@ -64,7 +65,9 @@ import {
 } from "@/lib/hackathon.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
-  loader: () => adminOverview(),
+  loader: () => {
+    return adminOverview();
+  },
   head: () => ({
     meta: [
       { title: "Admin console â Vertex" },
@@ -80,10 +83,12 @@ export const Route = createFileRoute("/_authenticated/admin")({
     ],
   }),
   component: AdminPage,
-  errorComponent: () => (
+  errorComponent: ({ error }) => (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
       <p className="max-w-sm text-center font-mono text-sm text-muted-foreground">
-        This console is for team heads and admins only.
+        {import.meta.env.DEV && error instanceof Error
+          ? error.message
+          : "This console is for team heads and admins only."}
       </p>
     </div>
   ),
@@ -166,6 +171,7 @@ function AdminPage() {
         <h1 className="mt-5 font-display text-4xl font-semibold tracking-tight md:text-6xl">
           Control room.
         </h1>
+        {!isEventDesk && <HackathonAdminNav />}
 
         {!isEventDesk && (
           <div className="mt-6 grid grid-cols-2 gap-px border border-hairline bg-hairline sm:grid-cols-3 lg:grid-cols-6">
