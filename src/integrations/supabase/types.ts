@@ -394,6 +394,7 @@ export type Database = {
           reversal_reason: string | null;
           previous_status: string | null;
           reviewed_by_user_id: string | null;
+          guide_missing: boolean;
           review_note: string | null;
           email_sent_at: string | null;
           code: string;
@@ -419,6 +420,7 @@ export type Database = {
           reversal_reason?: string | null;
           previous_status?: string | null;
           reviewed_by_user_id?: string | null;
+          guide_missing?: boolean;
           review_note?: string | null;
           email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";
@@ -444,6 +446,7 @@ export type Database = {
           reversal_reason?: string | null;
           previous_status?: string | null;
           reviewed_by_user_id?: string | null;
+          guide_missing?: boolean;
           review_note?: string | null;
           email_sent_at?: string | null;
           status?: "pending" | "approved" | "rejected" | "waitlisted";
@@ -1467,6 +1470,10 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      prepare_sarvam_guide_retry: {
+        Args: { p_id: string; p_expected: string; p_payload: Json };
+        Returns: boolean;
+      };
       is_hackathon_admin: { Args: Record<PropertyKey, never>; Returns: boolean };
       queue_sarvam_reconsideration: {
         Args: { p_id: string; p_queued: boolean };

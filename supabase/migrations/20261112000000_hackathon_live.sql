@@ -18,6 +18,7 @@ REVOKE ALL ON FUNCTION public.is_hackathon_admin() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.is_hackathon_admin() TO anon, authenticated, service_role;
 
 ALTER TABLE public.event_registrations
+ ADD COLUMN IF NOT EXISTS guide_missing boolean NOT NULL DEFAULT false,
  ADD COLUMN IF NOT EXISTS reviewed_by text,
  ADD COLUMN IF NOT EXISTS reviewed_by_user_id uuid,
  ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
@@ -67,6 +68,8 @@ CREATE TABLE IF NOT EXISTS public.hackathon_review_emails (
   sent_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE public.hackathon_review_emails
+ ADD COLUMN IF NOT EXISTS delivery_history jsonb NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE public.hackathon_review_emails ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.hackathon_review_emails FROM anon, authenticated;
 GRANT ALL ON public.hackathon_review_emails TO service_role;
@@ -118,7 +121,7 @@ BEGIN
   reviewer_email := public.hackathon_reviewer_email(p_reviewer);
   IF p_status NOT IN ('approved', 'rejected') THEN RAISE EXCEPTION 'Invalid decision'; END IF;
   UPDATE public.event_registrations SET status = p_status, reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
-    reviewed_at = now(), review_note = nullif(p_note, '')
+    reviewed_at = now(), review_note = nullif(p_note, ''), guide_missing = coalesce((p_payload->>'_guide_missing')::boolean,false)
   WHERE id = p_id AND status = 'pending'
     AND event_id IN (SELECT id FROM public.events WHERE slug = 'build-with-sarvam')
     AND (p_status <> 'approved' OR jsonb_array_length(form_data->'members') = 4)
@@ -207,7 +210,7 @@ BEGIN
       'reviewed_at', previous.reviewed_at, 'review_note', previous.review_note, 'email_sent_at', previous.email_sent_at),
       CASE WHEN old_email.id IS NOT NULL THEN to_jsonb(old_email) ELSE NULL END, p_reviewer, trim(p_note));
   UPDATE public.event_registrations SET status = 'approved', reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
-    reviewed_at = now(), review_note = trim(p_note), email_sent_at = NULL WHERE id = p_id;
+    reviewed_at = now(), review_note = trim(p_note), guide_missing = coalesce((p_payload->>'_guide_missing')::boolean,false), email_sent_at = NULL WHERE id = p_id;
   DELETE FROM public.hackathon_review_emails WHERE registration_id = p_id;
   -- A new ID gives the approval its own provider idempotency key.
   INSERT INTO public.hackathon_review_emails(registration_id, payload) VALUES (p_id, p_payload);
@@ -268,7 +271,7 @@ BEGIN
       'reviewed_at', previous.reviewed_at, 'review_note', previous.review_note, 'email_sent_at', previous.email_sent_at),
       CASE WHEN old_email.id IS NOT NULL THEN to_jsonb(old_email) ELSE NULL END, p_reviewer, trim(p_note));
   UPDATE public.event_registrations SET status = p_status, reconsidering = false, previous_status = previous.status, reversal_reason = trim(p_note), reviewed_by = reviewer_email, reviewed_by_user_id = p_reviewer,
-    reviewed_at = now(), review_note = trim(p_note), email_sent_at = NULL WHERE id = p_id;
+    reviewed_at = now(), review_note = trim(p_note), guide_missing = coalesce((p_payload->>'_guide_missing')::boolean,false), email_sent_at = NULL WHERE id = p_id;
   DELETE FROM public.hackathon_review_emails WHERE registration_id = p_id;
   -- A new ID gives the approval its own provider idempotency key.
   INSERT INTO public.hackathon_review_emails(registration_id, payload) VALUES (p_id, p_payload);
@@ -307,4 +310,21 @@ CREATE POLICY hackathon_announcements_admin ON public.event_announcements FOR AL
 DROP POLICY IF EXISTS hackathon_announcements_public ON public.event_announcements;
 CREATE POLICY hackathon_announcements_public ON public.event_announcements FOR SELECT TO anon, authenticated USING (published);
 GRANT EXECUTE ON FUNCTION public.is_sarvam_event(uuid) TO anon;
+CREATE OR REPLACE FUNCTION public.prepare_sarvam_guide_retry(p_id uuid, p_expected uuid, p_payload jsonb)
+RETURNS boolean LANGUAGE plpgsql SECURITY INVOKER SET search_path='' AS $$
+DECLARE current_row public.event_registrations%ROWTYPE;
+BEGIN
+ SELECT * INTO current_row FROM public.event_registrations WHERE id=p_id AND status='approved' AND guide_missing AND email_sent_at IS NOT NULL FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ UPDATE public.hackathon_review_emails SET
+   delivery_history=delivery_history || jsonb_build_array(jsonb_build_object('id',id,'payload',payload,'sent_at',sent_at)),
+   id=gen_random_uuid(),payload=p_payload,claimed_at=NULL,first_attempt_at=NULL,sent_at=NULL
+ WHERE registration_id=p_id AND id=p_expected AND sent_at IS NOT NULL;
+ IF NOT FOUND THEN RETURN false; END IF;
+ UPDATE public.event_registrations SET guide_missing=false,email_sent_at=NULL WHERE id=p_id;
+ RETURN true;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.prepare_sarvam_guide_retry(uuid,uuid,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.prepare_sarvam_guide_retry(uuid,uuid,jsonb) TO service_role;
 COMMIT;

@@ -132,6 +132,50 @@ assert.equal(
     .email_sent_at,
   null,
 );
+await db.query("select queue_sarvam_reconsideration($1,true)", [id]);
+await db.query("select reconsider_sarvam_submission($1,'approved',$2,'Reconsidered',$3)", [
+  id,
+  reviewer,
+  { to: ["private@example.test"], subject: "No guide", _guide_missing: true },
+]);
+const missing = (await db.query("select * from claim_sarvam_review_email($1)", [id])).rows[0];
+await db.query("select complete_sarvam_review_email($1,$2)", [id, missing.claimed_at]);
+assert.equal(
+  (await db.query("select guide_missing from event_registrations where id=$1", [id])).rows[0]
+    .guide_missing,
+  true,
+);
+const guidePayload = {
+  to: ["private@example.test"],
+  subject: "With guide",
+  attachments: [{ filename: "guide.pdf", content: "JVBERg==" }],
+};
+assert.equal(
+  (
+    await db.query("select prepare_sarvam_guide_retry($1,$2,$3) as ok", [
+      id,
+      missing.id,
+      guidePayload,
+    ])
+  ).rows[0].ok,
+  true,
+);
+assert.equal(
+  (
+    await db.query("select prepare_sarvam_guide_retry($1,$2,$3) as ok", [
+      id,
+      missing.id,
+      guidePayload,
+    ])
+  ).rows[0].ok,
+  false,
+);
+const replacement = (
+  await db.query("select * from hackathon_review_emails where registration_id=$1", [id])
+).rows[0];
+assert.notEqual(replacement.id, missing.id);
+assert.equal(replacement.delivery_history.length, 1);
+assert.equal(replacement.payload.attachments.length, 1);
 await db.close();
 console.log(
   "Live migration passed twice: seeded admin, RLS read/update/write restrictions, public announcements, duplicate decisions, email claims, reversal audit and stale completion protection.",

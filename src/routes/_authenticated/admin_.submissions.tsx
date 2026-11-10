@@ -315,13 +315,17 @@ function SubmissionsPage() {
                   )}
                   {row.status !== "pending" && (
                     <span className="text-xs text-muted-foreground">
-                      {row.emailSentAt ? "Leader email sent" : "Leader email not confirmed"}
+                      {row.emailSentAt
+                        ? row.guideMissing
+                          ? "Leader email sent · guide missing; resend available"
+                          : "Leader email sent"
+                        : "Leader email not confirmed"}
                     </span>
                   )}
                   {data?.canReview &&
                     row.reviewedAt &&
                     row.status !== "pending" &&
-                    !row.emailSentAt && (
+                    (!row.emailSentAt || row.guideMissing) && (
                       <button
                         disabled={!!busy}
                         className="btn-ghost rounded-full px-4 py-2 text-xs disabled:opacity-40"

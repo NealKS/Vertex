@@ -3,7 +3,7 @@ import { z } from "zod";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { loadViewer, type Db } from "@/lib/roles.server";
 import { submissionFromRow } from "@/lib/hackathon-admin";
-import { renderHackathonEmail } from "@/lib/hackathonEmail";
+import { buildDecisionMessage } from "./hackathon-message.server";
 
 export function fail(status: number, message: string): never {
   setResponseStatus(status);
@@ -36,7 +36,7 @@ export async function allSubmissions(includeReviewerEmails = false) {
     const { data, error } = await supabaseAdmin
       .from("event_registrations")
       .select(
-        "reviewed_by_user_id,reconsidering,reversal_reason,previous_status,id,event_id,name,email,phone,usn,code,created_at,status,form_data,reviewed_at,reviewed_by,review_note,email_sent_at,checked_in_at,checked_in_by,pass_sent_at,pass_sent_to,workspace_registration",
+        "guide_missing,reviewed_by_user_id,reconsidering,reversal_reason,previous_status,id,event_id,name,email,phone,usn,code,created_at,status,form_data,reviewed_at,reviewed_by,review_note,email_sent_at,checked_in_at,checked_in_by,pass_sent_at,pass_sent_to,workspace_registration",
       )
       .eq("event_id", eventId)
       .order("created_at", { ascending: false })
@@ -59,6 +59,10 @@ const payloadSchema = z.object({
   html: z.string(),
   text: z.string(),
   reply_to: z.string().optional(),
+  attachments: z
+    .array(z.object({ filename: z.string(), content: z.string() }))
+    .max(1)
+    .optional(),
 });
 export async function deliverReviewEmail(id: string) {
   if (!process.env.RESEND_API_KEY)
@@ -140,20 +144,14 @@ export async function reviewSubmission(
     (input.reconsider ? `Decision reversed from ${data.status} to ${input.status}.` : "");
   if (input.status === "approved" && row.members.length !== 4)
     fail(400, "Approval requires exactly 4 team members.");
-  const from = process.env.FROM_EMAIL || "Vertex Club <events@abscissa.dev>";
   if (!process.env.RESEND_API_KEY) fail(503, "Set RESEND_API_KEY before reviewing submissions.");
-  const content = renderHackathonEmail({
+  const message = await buildDecisionMessage({
     ...row,
     status: input.status,
     note,
     reconsider: input.reconsider,
   });
-  const payload = {
-    from,
-    to: [row.email],
-    ...content,
-    reply_to: process.env.EVENTS_REPLY_TO || "events@abscissa.dev",
-  };
+  const payload = { ...message.payload, _guide_missing: message.guideMissing };
   const result = await supabaseAdmin.rpc(
     input.reconsider ? "reconsider_sarvam_submission" : "review_sarvam_submission",
     {
@@ -174,7 +172,40 @@ export async function reviewSubmission(
     ok: true,
     ...delivery,
     emailMessage: delivery.emailSent
-      ? `${input.status === "approved" ? "Approved" : "Rejected"} · email sent to ${row.email}`
+      ? `${input.status === "approved" ? "Approved" : "Rejected"} · email sent to ${row.email}${message.guideMissing ? " · guide missing; use Resend email to send it" : ""}`
       : delivery.emailMessage,
   };
+}
+
+export async function retryDecisionEmail(id: string) {
+  const { data: row, error } = await supabaseAdmin
+    .from("event_registrations")
+    .select("*")
+    .eq("id", id)
+    .eq("event_id", await sarvamEventId())
+    .single();
+  if (error || !row) fail(404, "Submission not found.");
+  if (row.guide_missing && row.email_sent_at && row.status === "approved") {
+    const { data: outbox, error: readError } = await supabaseAdmin
+      .from("hackathon_review_emails")
+      .select("id")
+      .eq("registration_id", id)
+      .single();
+    if (readError || !outbox) fail(409, "Review email not found.");
+    const message = await buildDecisionMessage({
+      ...submissionFromRow(row),
+      status: "approved",
+      note: row.review_note || "",
+    });
+    if (message.guideMissing)
+      fail(503, "The guide could not be generated. Retry later; no duplicate email was sent.");
+    const prepared = await supabaseAdmin.rpc("prepare_sarvam_guide_retry", {
+      p_id: id,
+      p_expected: outbox.id,
+      p_payload: message.payload,
+    });
+    if (prepared.error || !prepared.data)
+      fail(409, "This decision changed or another resend started. Refresh the list.");
+  }
+  return deliverReviewEmail(id);
 }

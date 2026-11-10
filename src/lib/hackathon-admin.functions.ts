@@ -30,9 +30,9 @@ export const retryHackathonEmail = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => z.object({ id: z.string().uuid() }).parse(input))
   .handler(async ({ context, data }) => {
-    const { requireHackathonAccess, deliverReviewEmail } = await import("./hackathon-admin.server");
+    const { requireHackathonAccess, retryDecisionEmail } = await import("./hackathon-admin.server");
     await requireHackathonAccess(context);
-    return deliverReviewEmail(data.id);
+    return retryDecisionEmail(data.id);
   });
 export const exportApprovedSubmissions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

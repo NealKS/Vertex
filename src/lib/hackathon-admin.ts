@@ -32,6 +32,7 @@ export type Submission = {
   reviewedByEmail?: string | null;
   reviewNote: string | null;
   emailSentAt: string | null;
+  guideMissing?: boolean;
   reconsidering?: boolean;
   reversalReason?: string | null;
   previousStatus?: string | null;
@@ -124,6 +125,7 @@ export function submissionFromRow(row: Registration): Submission {
     reviewedBy: row.reviewed_by,
     reviewNote: row.review_note,
     emailSentAt: row.email_sent_at,
+    guideMissing: row.guide_missing,
     reconsidering: row.reconsidering,
     reversalReason: row.reversal_reason,
     previousStatus: row.previous_status,
